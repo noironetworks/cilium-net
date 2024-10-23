@@ -6,6 +6,7 @@ package experimental
 import (
 	"bufio"
 	"context"
+	"log/slog"
 	"maps"
 	"os"
 	"strings"
@@ -40,13 +41,14 @@ func TestScript(t *testing.T) {
 	// pkg/k8s/endpoints.go uses this in ParseEndpointSlice*
 	option.Config.EnableK8sTerminatingEndpoint = true
 
-	log := hivetest.Logger(t)
+	log := hivetest.Logger(t, hivetest.LogLevel(slog.LevelDebug))
 	scripttest.Test(t,
 		context.Background(),
 		func(t testing.TB, args []string) *script.Engine {
 			h := hive.New(
 				client.FakeClientCell,
 				daemonk8s.ResourcesCell,
+				daemonk8s.TablesCell,
 				Cell,
 				cell.Config(TestConfig{
 					// By default 10% of the time the LBMap operations fail
