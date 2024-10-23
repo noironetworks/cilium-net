@@ -299,7 +299,6 @@ func (k *K8sWatcher) InitK8sSubsystem(ctx context.Context, cachesSynced chan str
 
 	log.Info("Enabling k8s event listener")
 	k.enableK8sWatchers(ctx, resources)
-	close(k.k8sPodWatcher.controllersStarted)
 
 	go func() {
 		log.Info("Waiting until all pre-existing resources have been received")
