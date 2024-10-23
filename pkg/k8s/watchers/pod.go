@@ -45,9 +45,7 @@ import (
 	"github.com/cilium/cilium/pkg/k8s"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client"
 	"github.com/cilium/cilium/pkg/k8s/informer"
-	"github.com/cilium/cilium/pkg/k8s/resource"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
-	slim_metav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	slimclientset "github.com/cilium/cilium/pkg/k8s/slim/k8s/client/clientset/versioned"
 	k8sSynced "github.com/cilium/cilium/pkg/k8s/synced"
 	k8sTypes "github.com/cilium/cilium/pkg/k8s/types"
@@ -58,7 +56,6 @@ import (
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/labelsfilter"
 	"github.com/cilium/cilium/pkg/loadbalancer"
-	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
@@ -91,6 +88,7 @@ type k8sPodWatcherParams struct {
 	IPCache           *ipcache.IPCache
 	ServiceManager    service.ServiceManager
 	DB                *statedb.DB
+	Pods              statedb.Table[agentK8s.LocalPod]
 	NodeAddrs         statedb.Table[datapathTables.NodeAddress]
 	LRPManager        *redirectpolicy.Manager
 	BandwidthManager  datapath.BandwidthManager
@@ -112,10 +110,8 @@ func newK8sPodWatcher(params k8sPodWatcherParams) *K8sPodWatcher {
 		bandwidthManager:      params.BandwidthManager,
 		resources:             params.Resources,
 		db:                    params.DB,
+		pods:                  params.Pods,
 		nodeAddrs:             params.NodeAddrs,
-
-		controllersStarted: make(chan struct{}),
-		podStoreSet:        make(chan struct{}),
 	}
 }
 
@@ -141,17 +137,7 @@ type K8sPodWatcher struct {
 	resources             agentK8s.Resources
 	db                    *statedb.DB
 	nodeAddrs             statedb.Table[datapathTables.NodeAddress]
-
-	podStoreMU lock.RWMutex
-	podStore   cache.Store
-	// podStoreSet is a channel that is closed when the podStore cache is
-	// variable is written for the first time.
-	podStoreSet  chan struct{}
-	podStoreOnce sync.Once
-
-	// controllersStarted is a channel that is closed when all watchers that do not depend on
-	// local node configuration have been started
-	controllersStarted chan struct{}
+	pods                  statedb.Table[agentK8s.LocalPod]
 }
 
 // createAllPodsController is used in the rare configurations where CiliumEndpointCRD is disabled.
@@ -208,39 +194,46 @@ func (k *K8sPodWatcher) podsInit(asyncControllers *sync.WaitGroup) {
 		ctx, cancel := context.WithCancel(context.Background())
 		var synced atomic.Bool
 		go func() {
-			pods := make(map[resource.Key]*slim_corev1.Pod)
-			for ev := range k.resources.LocalPods.Events(ctx) {
-				switch ev.Kind {
-				case resource.Sync:
-					// Set the pod store now that resource has synchronized. Only
-					// error expected is if we're being stopped (context cancelled).
-					podStore, err := k.resources.LocalPods.Store(ctx)
-					if err == nil {
-						k.podStoreMU.Lock()
-						k.podStore = podStore.CacheStore()
-						k.podStoreMU.Unlock()
-						k.podStoreOnce.Do(func() {
-							close(k.podStoreSet)
-						})
-					}
-					synced.Store(true)
-				case resource.Upsert:
-					newPod := ev.Object
-					oldPod := pods[ev.Key]
-					if oldPod == nil {
-						k.addK8sPodV1(newPod)
+			pods := make(map[types.NamespacedName]*slim_corev1.Pod)
+
+			wtxn := k.db.WriteTxn(k.pods)
+			_, initWatch := k.pods.Initialized(wtxn)
+			changeIter, err := k.pods.Changes(wtxn)
+			wtxn.Commit()
+			if err != nil {
+				return
+			}
+
+			for {
+				txn := k.db.ReadTxn()
+				changes, watch := changeIter.Next(txn)
+				for change := range changes {
+					pod := change.Object.Pod
+					name := types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+					if !change.Deleted {
+						oldPod := pods[name]
+						if oldPod == nil {
+							k.addK8sPodV1(pod)
+						} else {
+							k.updateK8sPodV1(oldPod, pod)
+						}
+						k.k8sResourceSynced.SetEventTimestamp(podApiGroup)
+						pods[name] = pod
 					} else {
-						k.updateK8sPodV1(oldPod, newPod)
+						k.deleteK8sPodV1(pod)
+						k.k8sResourceSynced.SetEventTimestamp(podApiGroup)
+						delete(pods, name)
 					}
-					k.k8sResourceSynced.SetEventTimestamp(podApiGroup)
-					pods[ev.Key] = newPod
-				case resource.Delete:
-					k.deleteK8sPodV1(ev.Object)
-					k.k8sResourceSynced.SetEventTimestamp(podApiGroup)
-					delete(pods, ev.Key)
 				}
 
-				ev.Done(nil)
+				select {
+				case <-ctx.Done():
+					return
+				case <-watch:
+				case <-initWatch:
+					synced.Store(true)
+					initWatch = nil
+				}
 			}
 		}()
 
@@ -265,7 +258,7 @@ func (k *K8sPodWatcher) podsInit(asyncControllers *sync.WaitGroup) {
 
 	// If CiliumEndpointCRD is disabled, we will fallback on watching all pods.
 	for {
-		podStore, podController := k.createAllPodsController(k.clientset.Slim())
+		_, podController := k.createAllPodsController(k.clientset.Slim())
 
 		isConnected := make(chan struct{})
 		// once isConnected is closed, it will stop waiting on caches to be
@@ -276,13 +269,6 @@ func (k *K8sPodWatcher) podsInit(asyncControllers *sync.WaitGroup) {
 			k.k8sAPIGroups.AddAPI(resources.K8sAPIGroupPodV1Core)
 		})
 		go podController.Run(isConnected)
-
-		k.podStoreMU.Lock()
-		k.podStore = podStore
-		k.podStoreMU.Unlock()
-		k.podStoreOnce.Do(func() {
-			close(k.podStoreSet)
-		})
 
 		// Replace pod controller by only receiving events from our own
 		// node once we are connected to the kvstore.
@@ -1057,26 +1043,14 @@ func (k *K8sPodWatcher) deletePodHostData(pod *slim_corev1.Pod) (bool, error) {
 
 // GetCachedPod returns a pod from the local store.
 func (k *K8sPodWatcher) GetCachedPod(namespace, name string) (*slim_corev1.Pod, error) {
-	<-k.controllersStarted
-	k.k8sResourceSynced.WaitForCacheSync(resources.K8sAPIGroupPodV1Core)
-	<-k.podStoreSet
-	k.podStoreMU.RLock()
-	defer k.podStoreMU.RUnlock()
-	pName := &slim_corev1.Pod{
-		ObjectMeta: slim_metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
-	}
-	podInterface, exists, err := k.podStore.Get(pName)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
+	_, initWatch := k.pods.Initialized(k.db.ReadTxn())
+	<-initWatch
+	pod, _, found := k.pods.Get(k.db.ReadTxn(), agentK8s.PodByName(namespace, name))
+	if !found {
 		return nil, k8sErrors.NewNotFound(schema.GroupResource{
 			Group:    "core",
 			Resource: "pod",
 		}, name)
 	}
-	return podInterface.(*slim_corev1.Pod).DeepCopy(), nil
+	return pod.Pod, nil
 }
