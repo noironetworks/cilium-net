@@ -110,9 +110,9 @@ func (w *watcher) HandleNewResourceVersion(typeUrl string, _ uint64) {
 	}
 }
 
-// process waits for the trigger (new resource version) and invokes the callback function.
-// It needs to be done asynchronyously from HandleNewResourceVersion, because
-// the cache invoking the function holds a lock on the resources.
+// process waits for the trigger (new resource version) and invokes the callback
+// function. It needs to be done asynchronously from HandleNewResourceVersion,
+// because the cache invoking the function holds a lock on the resources.
 func (l *watcher) process() {
 	for range l.trigger {
 		resVer, err := l.resources.GetResources(l.typeUrl, 0, "", nil)

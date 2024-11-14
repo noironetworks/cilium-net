@@ -60,9 +60,6 @@ type flavour[ReqT requestCons, RespT responseCons] interface {
 	// transport constructs an instance of a transport based on the provided xDS ADS gRPC client.
 	transport(ctx context.Context, client discoverypb.AggregatedDiscoveryServiceClient) (transport[ReqT, RespT], error)
 
-	// initialReq creates an initial request for a given type url.
-	initialReq(typeUrl string) (request ReqT)
-
 	// prepareObsReq creates a request based on parameters used in Observe calls.
 	// get may be used to obtain the current contents of clients cache.
 	prepareObsReq(obsReq *observeRequest, get getter) (request ReqT, err error)
@@ -212,11 +209,6 @@ func (c *XDSClient[ReqT, RespT]) process(parentCtx context.Context, client disco
 		return fmt.Errorf("start transport: %w", err)
 	}
 
-	if err := c.sendInitialDiscoveryRequests(ctx, trans); err != nil {
-		cancel()
-		return fmt.Errorf("start request routine: %w", err)
-	}
-
 	errRespCh := make(chan error, 1)
 	go c.fetchResponses(ctx, errRespCh, trans)
 	errLoopCh := make(chan error, 1)
@@ -259,25 +251,6 @@ func (c *XDSClient[ReqT, RespT]) isRetriableErr(err error) bool {
 		return false
 	}
 	return c.opts.IsRetriable(status.Code(err))
-}
-
-// sendInitialDiscoveryRequests sends requests for all configured ObservedResources.
-func (c *XDSClient[ReqT, RespT]) sendInitialDiscoveryRequests(ctx context.Context, trans transport[ReqT, RespT]) error {
-	log := c.log.With(logfields.Hint, "initial-requests")
-	for _, typeUrl := range c.opts.BootstrapResources {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		req := c.xds.initialReq(typeUrl)
-		log.Debug("Send", logfields.Request, req)
-		err := trans.Send(req)
-		if err != nil {
-			return fmt.Errorf("initial requests: send: %w", err)
-		}
-	}
-	return nil
 }
 
 // fetchResponses will pass messages from Recv() calls to queue until Context ctx is done.

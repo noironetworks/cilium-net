@@ -33,13 +33,6 @@ func (sotw *sotw) transport(ctx context.Context, client discoverypb.AggregatedDi
 	return client.StreamAggregatedResources(ctx, grpc.WaitForReady(true))
 }
 
-func (sotw *sotw) initialReq(typeUrl string) *discoverypb.DiscoveryRequest {
-	return &discoverypb.DiscoveryRequest{
-		Node:    sotw.node,
-		TypeUrl: typeUrl,
-	}
-}
-
 func (sotw *sotw) prepareObsReq(obsReq *observeRequest, get getter) (*discoverypb.DiscoveryRequest, error) {
 	curr, err := get(obsReq.typeUrl)
 	if err != nil {
