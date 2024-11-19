@@ -75,9 +75,6 @@ type flavour[ReqT requestCons, RespT responseCons] interface {
 	nack(resp RespT, detail error) (request ReqT)
 }
 
-// watcherHandle is an identifier for watchers.
-type watcherHandle uint64
-
 // BaseLayer is the public interface of xDS client.
 type BaseLayer interface {
 	// Observe adds resources of given type url and names to the attention set
@@ -85,11 +82,9 @@ type BaseLayer interface {
 	Observe(ctx context.Context, typeUrl string, resourceNames []string) error
 
 	// AddResourceWatcher registers a callback cb that will be invoked every
-	// time a resource with given type url changes.
-	AddResourceWatcher(typeUrl string, cb WatcherCallback) watcherHandle
-
-	// RemoveResourceWatcher deletes callback registered with given id.
-	RemoveResourceWatcher(id watcherHandle)
+	// time a resource with given type url changes. Function returns a callback
+	// to deregister the watcher.
+	AddResourceWatcher(typeUrl string, cb WatcherCallback) func()
 }
 
 // BaseLayerWithRun extends BaseLayer interface with Run method.
@@ -393,10 +388,11 @@ func (c *XDSClient[ReqT, RespT]) handleResponse(trans transport[ReqT, RespT], re
 	return nil
 }
 
-func (c *XDSClient[ReqT, RespT]) AddResourceWatcher(typeUrl string, cb WatcherCallback) watcherHandle {
-	return c.watchers.Add(typeUrl, cb)
-}
+func (c *XDSClient[ReqT, RespT]) AddResourceWatcher(typeUrl string, cb WatcherCallback) func() {
+	id := c.watchers.Add(typeUrl, cb)
+	cancel := func() {
+		c.watchers.Remove(id)
 
-func (c *XDSClient[ReqT, RespT]) RemoveResourceWatcher(id watcherHandle) {
-	c.watchers.Remove(id)
+	}
+	return cancel
 }

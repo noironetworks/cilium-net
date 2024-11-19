@@ -11,6 +11,9 @@ import (
 	"github.com/cilium/cilium/pkg/logging/logfields"
 )
 
+// watcherHandle is an identifier for watchers.
+type watcherHandle uint64
+
 // callbackManager is a helper structure for Client focused on [un]registering callbacks on resource changes.
 type callbackManager struct {
 	log *slog.Logger
