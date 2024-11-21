@@ -225,14 +225,13 @@ func (r *k8sReflector[Obj]) run(ctx context.Context, health cell.Health) error {
 	}
 
 	type entry struct {
-		deleted   bool
-		name      string
-		namespace string
-		obj       any
+		deleted bool
+		name    Name
+		obj     any
 	}
 	type buffer struct {
 		replaceItems []any
-		entries      map[string]entry
+		entries      map[Name]entry
 	}
 	bufferSize := r.BufferSize
 	waitTime := r.BufferWaitTime
@@ -290,12 +289,12 @@ func (r *k8sReflector[Obj]) run(ctx context.Context, health cell.Health) error {
 			case ev.Kind == CacheStoreEventReplace:
 				return &buffer{
 					replaceItems: ev.Obj.([]any),
-					entries:      make(map[string]entry, bufferSize), // Forget prior entries
+					entries:      make(map[Name]entry, bufferSize), // Forget prior entries
 				}
 			case buf == nil:
 				buf = &buffer{
 					replaceItems: nil,
-					entries:      make(map[string]entry, bufferSize),
+					entries:      make(map[Name]entry, bufferSize),
 				}
 			}
 
@@ -307,15 +306,12 @@ func (r *k8sReflector[Obj]) run(ctx context.Context, health cell.Health) error {
 			if err != nil {
 				panic(fmt.Sprintf("%T internal error: meta.Accessor failed: %s", r, err))
 			}
-			entry.name = meta.GetName()
-			entry.namespace = meta.GetNamespace()
-			var key string
-			if entry.namespace != "" {
-				key = entry.namespace + "/" + entry.name
+			if ns := meta.GetNamespace(); ns != "" {
+				entry.name = NewNamespacedName(ns, meta.GetName())
 			} else {
-				key = entry.name
+				entry.name = NewName(meta.GetName())
 			}
-			buf.entries[key] = entry
+			buf.entries[entry.name] = entry
 			return buf
 		},
 	)
