@@ -52,6 +52,12 @@ type Frontend struct {
 	// Backends associated with the frontend.
 	Backends []BackendWithRevision
 
+	// RedirectTo if set selects the backends from this service name instead
+	// of that of [FrontendParams.ServiceName]. This is used to implement the
+	// local redirect policies where traffic going to a specific service/frontend
+	// is redirected to a local pod instead.
+	RedirectTo *loadbalancer.ServiceName
+
 	// nodePortAddrs are the IP addresses on which to serve NodePort and HostPort
 	// services. Not set if [Type] is not NodePort or HostPort. These are updated
 	// when the Table[NodeAddress] changes.
@@ -96,6 +102,7 @@ func (fe *Frontend) TableHeader() []string {
 		"ServiceName",
 		"PortName",
 		"Backends",
+		"RedirectTo",
 		"Status",
 		"Since",
 		"Error",
@@ -103,12 +110,17 @@ func (fe *Frontend) TableHeader() []string {
 }
 
 func (fe *Frontend) TableRow() []string {
+	redirectTo := ""
+	if fe.RedirectTo != nil {
+		redirectTo = fe.RedirectTo.String()
+	}
 	return []string{
 		fe.Address.StringWithProtocol(),
 		string(fe.Type),
 		fe.ServiceName.String(),
 		string(fe.PortName),
 		showBackends(fe.Backends),
+		redirectTo,
 		string(fe.Status.Kind),
 		duration.HumanDuration(time.Since(fe.Status.UpdatedAt)),
 		fe.Status.Error,

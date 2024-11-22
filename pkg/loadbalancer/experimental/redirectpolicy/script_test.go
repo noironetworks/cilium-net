@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package experimental
+package redirectpolicy
 
 import (
-	"bufio"
 	"context"
-	"log/slog"
 	"maps"
-	"os"
-	"strings"
 	"testing"
 
 	"github.com/cilium/hive/cell"
@@ -27,43 +23,34 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/client"
 	"github.com/cilium/cilium/pkg/k8s/testutils"
 	"github.com/cilium/cilium/pkg/k8s/version"
+	"github.com/cilium/cilium/pkg/loadbalancer/experimental"
 	"github.com/cilium/cilium/pkg/option"
 )
 
 func TestScript(t *testing.T) {
-	// version/capabilities are unfortunately a global variable, so we're forcing it here.
-	// This makes it difficult to have different k8s version/capabilities (e.g. use Endpoints
-	// not EndpointSlice) in the tests here, which is why we're currently only testing against
-	// the default.
-	// Issue for fixing this: https://github.com/cilium/cilium/issues/35537
 	version.Force(testutils.DefaultVersion)
 
-	// pkg/k8s/endpoints.go uses this in ParseEndpointSlice*
-	option.Config.EnableK8sTerminatingEndpoint = true
-
-	log := hivetest.Logger(t, hivetest.LogLevel(slog.LevelDebug))
 	scripttest.Test(t,
 		context.Background(),
 		func(t testing.TB, args []string) *script.Engine {
+			log := hivetest.Logger(t)
 			h := hive.New(
 				client.FakeClientCell,
 				daemonk8s.ResourcesCell,
 				daemonk8s.TablesCell,
+				experimental.Cell,
 				Cell,
-				cell.Config(TestConfig{
-					// By default 10% of the time the LBMap operations fail
-					TestFaultProbability: 0.1,
-				}),
 				cell.Provide(
-					func(cfg TestConfig) *TestConfig { return &cfg },
+					func() *experimental.TestConfig { return &experimental.TestConfig{} },
 					tables.NewNodeAddressTable,
 					statedb.RWTable[tables.NodeAddress].ToTable,
 					func() *option.DaemonConfig {
 						return &option.DaemonConfig{
-							EnableIPv4:        true,
-							EnableIPv6:        true,
-							SockRevNatEntries: 1000,
-							LBMapEntries:      1000,
+							EnableIPv4:                true,
+							EnableIPv6:                true,
+							SockRevNatEntries:         1000,
+							LBMapEntries:              1000,
+							EnableLocalRedirectPolicy: true,
 						}
 					},
 				),
@@ -75,15 +62,7 @@ func TestScript(t *testing.T) {
 
 			// Set some defaults
 			flags.Set("enable-experimental-lb", "true")
-			flags.Set("lb-retry-backoff-min", "10ms") // as we're doing fault injection we want
-			flags.Set("lb-retry-backoff-max", "10ms") // tiny backoffs
-
-			// Parse and process the "#! --flag=true" magic line.
-			_, scriptFile, _ := strings.Cut(t.Name(), "/")
-			if args := parseArgsLine("testdata/" + scriptFile); len(args) > 0 {
-				require.NoError(t, flags.Parse(args), "flags.Parse")
-				t.Logf("Parsed arguments: %v", args)
-			}
+			require.NoError(t, flags.Parse(args), "flags.Parse")
 
 			t.Cleanup(func() {
 				assert.NoError(t, h.Stop(log, context.TODO()))
@@ -96,17 +75,4 @@ func TestScript(t *testing.T) {
 				Cmds: cmds,
 			}
 		}, []string{}, "testdata/*.txtar")
-}
-
-func parseArgsLine(file string) []string {
-	f, err := os.Open(file)
-	if err != nil {
-		panic(err)
-	}
-	b, _, _ := bufio.NewReader(f).ReadLine()
-	if strings.HasPrefix(string(b), "#! ") {
-		line := string(b[3:])
-		return strings.Split(line, " ")
-	}
-	return nil
 }
