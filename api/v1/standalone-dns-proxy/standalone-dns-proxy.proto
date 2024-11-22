@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Cilium
+
+syntax = "proto3";
+
+package standalonednsproxy;
+
+option go_package = "github.com/cilium/cilium/api/v1/standalonednsproxy";
+
+service FQDNData {
+  rpc SubscribeToDNSPolicies(stream  DNSPoliciesResult) returns (stream DNSPolicies) {}
+  rpc UpdatesMappings(FQDNMapping) returns (UpdatesMappingsResult) {}
+}
+
+message DNSPoliciesResult {
+    bool success = 1;
+    string request_id = 2;
+}
+
+message FQDNMapping {
+    string FQDN = 1;
+    repeated bytes IPS = 2;
+    uint32 TTL = 3;
+    uint32 source_identity = 4; // Identity of the client making the DNS request
+    bytes source_ip = 5; // IP address of the client making the DNS request
+    uint32 response_code = 6;
+}
+
+message UpdatesMappingsResult {
+    bool success = 1;
+}
+
+message DNSResponseData {
+    bool response = 1;
+    repeated string cnames = 2;
+    repeated uint32 qtypes = 3;
+    repeated uint32 answer_times = 4;
+}
+
+message DNSServer {
+    uint32 dns_server_identity = 1;  // Identity of destination DNS server
+    uint32 dns_server_port = 2;
+    uint32 dns_server_proto = 3;
+}
+
+message DNSPolicy {
+    uint32 source_identity = 1;  // Identity of the workload this L7 DNS policy should apply to
+    repeated string dns_pattern = 2;  // Allowed DNS pattern this identity is allowed to resolve.
+    repeated DNSServer dns_servers = 3;
+}
+
+message DNSPolicies {
+    repeated DNSPolicy egress_l7_dns_policy = 1;
+    string request_id = 2; // Random UUID based identifier which will be referenced in ACKs
+}
