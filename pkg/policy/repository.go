@@ -134,6 +134,8 @@ type PolicyRepository interface {
 	// calculation.
 	GetSelectorPolicy(id *identity.Identity, skipRevision uint64, stats GetPolicyStatistics) (SelectorPolicy, uint64, error)
 
+	// GetPolicySnapshot returns a map of all the SelectorPolicies in the repository.
+	GetPolicySnapshot() map[identity.NumericIdentity]SelectorPolicy
 	GetRevision() uint64
 	GetRulesList() *models.Policy
 	GetSelectorCache() *SelectorCache
@@ -972,4 +974,9 @@ func (r *Repository) GetSelectorPolicy(id *identity.Identity, skipRevision uint6
 	}
 
 	return sp, rev, nil
+}
+
+// GetPolicySnapshot returns a map of all the SelectorPolicies in the repository.
+func (r *Repository) GetPolicySnapshot() map[identity.NumericIdentity]SelectorPolicy {
+	return r.policyCache.GetPolicySnapshot()
 }

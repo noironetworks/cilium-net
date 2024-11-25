@@ -565,6 +565,16 @@ func (e *Endpoint) runPreCompilationSteps(regenContext *regenerationContext) (pr
 		return fmt.Errorf("unable to regenerate policy for '%s': %w", e.StringID(), err)
 	}
 
+	// Once the policy has been calculated, we can update the standalone dns proxy as well.
+	// We need to send the snapshot of the policyRules to SDP.
+	// We have a read lock to avoid race in sending the policyRules to SDP during concurrent policy updates.
+	repo := e.policyGetter.GetPolicyRepository()
+	log.Debugf("Updating SDP with policy rules")
+	repo.RLock()
+	policyRules := repo.GetPolicySnapshot()
+	e.proxy.UpdateSDP(policyRules)
+	repo.RUnlock()
+
 	// Any possible DNS redirects had their rules updated by 'e.regeneratePolicy' above, so we
 	// can get the new DNS rules for restoration now, before we take the endpoint lock below.
 	// NOTE: Endpoint lock must not be held during 'GetDNSRules' as it locks IPCache, which

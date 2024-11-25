@@ -43,10 +43,21 @@ func (cache *policyCache) lookupOrCreate(identity *identityPkg.Identity) *cached
 	defer cache.Unlock()
 	cip, ok := cache.policies[identity.ID]
 	if !ok {
-		cip = newCachedSelectorPolicy(identity)
+		cip = newcachedSelectorPolicy(identity)
 		cache.policies[identity.ID] = cip
 	}
 	return cip
+}
+
+// GetPolicySnapshot returns a snapshot of the current policy cache.
+func (cache *policyCache) GetPolicySnapshot() map[identityPkg.NumericIdentity]SelectorPolicy {
+	cache.Lock()
+	defer cache.Unlock()
+	snapshot := make(map[identityPkg.NumericIdentity]SelectorPolicy, len(cache.policies))
+	for k, v := range cache.policies {
+		snapshot[k] = v.GetPolicy()
+	}
+	return snapshot
 }
 
 // delete forgets about any cached SelectorPolicy that this endpoint uses.
@@ -58,7 +69,7 @@ func (cache *policyCache) delete(identity *identityPkg.Identity) bool {
 	cip, ok := cache.policies[identity.ID]
 	if ok {
 		delete(cache.policies, identity.ID)
-		cip.getPolicy().Detach()
+		cip.GetPolicy().Detach()
 	}
 	return ok
 }
@@ -86,7 +97,7 @@ func (cache *policyCache) updateSelectorPolicy(identity *identityPkg.Identity) (
 	defer cip.Unlock()
 
 	// Don't resolve policy if it was already done for this or later revision.
-	if selPolicy := cip.getPolicy(); selPolicy != nil && selPolicy.Revision >= cache.repo.GetRevision() {
+	if selPolicy := cip.GetPolicy(); selPolicy != nil && selPolicy.Revision >= cache.repo.GetRevision() {
 		return selPolicy, false, nil
 	}
 
@@ -123,7 +134,7 @@ func (cache *policyCache) getAuthTypes(localID, remoteID identityPkg.NumericIden
 	}
 
 	// SelectorPolicy is const after it has been created, so no locking needed to access it
-	selPolicy := cip.getPolicy()
+	selPolicy := cip.GetPolicy()
 
 	var resTypes AuthTypes
 	for cs, authTypes := range selPolicy.L4Policy.authMap {
@@ -158,7 +169,7 @@ type cachedSelectorPolicy struct {
 	policy   atomic.Pointer[selectorPolicy]
 }
 
-func newCachedSelectorPolicy(identity *identityPkg.Identity) *cachedSelectorPolicy {
+func newcachedSelectorPolicy(identity *identityPkg.Identity) *cachedSelectorPolicy {
 	cip := &cachedSelectorPolicy{
 		identity: identity,
 	}
@@ -168,7 +179,7 @@ func newCachedSelectorPolicy(identity *identityPkg.Identity) *cachedSelectorPoli
 // getPolicy returns a reference to the selectorPolicy that is cached.
 //
 // Users should treat the result as immutable state that MUST NOT be modified.
-func (cip *cachedSelectorPolicy) getPolicy() *selectorPolicy {
+func (cip *cachedSelectorPolicy) GetPolicy() *selectorPolicy {
 	return cip.policy.Load()
 }
 
