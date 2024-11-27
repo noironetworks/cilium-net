@@ -770,6 +770,11 @@ pass_to_stack:
 	} else
 # endif /* ENABLE_IPSEC */
 #endif /* TUNNEL_MODE */
+#ifdef ENABLE_REPLY_TO_PROXY_MARK
+	if (ct_state->from_ingress_proxy) {
+		ctx->mark = MARK_MAGIC_TO_PROXY;
+	} else
+#endif /* ENABLE_REPLY_TO_PROXY_MARK */
 	{
 #ifdef ENABLE_IDENTITY_MARK
 		/* Always encode the source identity when passing to the stack.
@@ -1324,6 +1329,11 @@ pass_to_stack:
 	} else
 # endif /* ENABLE_IPSEC */
 #endif /* TUNNEL_MODE */
+#ifdef ENABLE_REPLY_TO_PROXY_MARK
+	if (ct_state->from_ingress_proxy) {
+		ctx->mark = MARK_MAGIC_TO_PROXY;
+	} else
+#endif /* ENABLE_REPLY_TO_PROXY_MARK */
 	{
 #ifdef ENABLE_IDENTITY_MARK
 		/* Always encode the source identity when passing to the stack.
@@ -1644,6 +1654,7 @@ ipv6_policy(struct __ctx_buff *ctx, struct ipv6hdr *ip6, int ifindex, __u32 src_
 		ct_state_new.src_sec_id = src_label;
 		ct_state_new.from_tunnel = from_tunnel;
 		ct_state_new.proxy_redirect = *proxy_port > 0;
+		ct_state_new.from_ingress_proxy = tc_index_from_ingress_proxy(ctx);
 
 		/* ext_err may contain a value from __policy_can_access, and
 		 * ct_create6 overwrites it only if it returns an error itself.
@@ -1993,6 +2004,7 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, int ifindex, __u32 src_la
 		ct_state_new.src_sec_id = src_label;
 		ct_state_new.from_tunnel = from_tunnel;
 		ct_state_new.proxy_redirect = *proxy_port > 0;
+		ct_state_new.from_ingress_proxy = tc_index_from_ingress_proxy(ctx);
 
 		/* ext_err may contain a value from __policy_can_access, and
 		 * ct_create4 overwrites it only if it returns an error itself.
