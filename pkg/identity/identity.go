@@ -30,10 +30,6 @@ type Identity struct {
 	// Set of labels that belong to this Identity.
 	Labels labels.Labels `json:"labels"`
 
-	// LabelArray contains the same labels as Labels in a form of a list, used
-	// for faster lookup.
-	LabelArray labels.LabelArray `json:"-"`
-
 	// CIDRLabel is the primary identity label when the identity represents
 	// a CIDR. The Labels field will consist of all matching prefixes, e.g.
 	// 10.0.0.0/8
@@ -69,7 +65,7 @@ type IPIdentityPair struct {
 	NamedPorts   []NamedPort     `json:"NamedPorts,omitempty"`
 }
 
-type IdentityMap map[NumericIdentity]labels.LabelArray
+type IdentityMap map[NumericIdentity]labels.Labels
 
 // GetKeyName returns the kvstore key to be used for the IPIdentityPair
 func (pair *IPIdentityPair) GetKeyName() string { return pair.PrefixString() }
@@ -101,14 +97,6 @@ type NamedPort struct {
 	Name     string `json:"Name"`
 	Port     uint16 `json:"Port"`
 	Protocol string `json:"Protocol"`
-}
-
-// Sanitize takes a partially initialized Identity (for example, deserialized
-// from json) and reconstitutes the full object from what has been restored.
-func (id *Identity) Sanitize() {
-	if id.Labels != nil {
-		id.LabelArray = id.Labels.LabelArray()
-	}
 }
 
 // StringID returns the identity identifier as string
@@ -147,24 +135,14 @@ func IsWellKnownIdentity(id NumericIdentity) bool {
 	return WellKnown.lookupByNumericIdentity(id) != nil
 }
 
-// NewIdentityFromLabelArray creates a new identity
-func NewIdentityFromLabelArray(id NumericIdentity, lblArray labels.LabelArray) *Identity {
-	var lbls labels.Labels
-
-	if lblArray != nil {
-		lbls = lblArray.Labels()
-	}
-	return &Identity{ID: id, Labels: lbls, LabelArray: lblArray}
+// NewIdentityFromLabels creates a new identity
+func NewIdentityFromLabels(id NumericIdentity, lbls labels.Labels) *Identity {
+	return &Identity{ID: id, Labels: lbls}
 }
 
 // NewIdentity creates a new identity
 func NewIdentity(id NumericIdentity, lbls labels.Labels) *Identity {
-	var lblArray labels.LabelArray
-
-	if lbls != nil {
-		lblArray = lbls.LabelArray()
-	}
-	return &Identity{ID: id, Labels: lbls, LabelArray: lblArray}
+	return &Identity{ID: id, Labels: lbls}
 }
 
 // IsHost determines whether the IP in the pair represents a host (true) or a
@@ -208,8 +186,8 @@ func ScopeForLabels(lbls labels.Labels) NumericIdentity {
 		return IdentityScopeRemoteNode
 	}
 
-	for _, label := range lbls {
-		switch label.Source {
+	for label := range lbls.All() {
+		switch label.Source() {
 		case labels.LabelSourceCIDR, labels.LabelSourceFQDN, labels.LabelSourceReserved, labels.LabelSourceCIDRGroup:
 			scope = IdentityScopeLocal
 		default:
@@ -251,10 +229,10 @@ func LookupReservedIdentityByLabels(lbls labels.Labels) *Identity {
 	}
 
 	// Check if a fixed identity exists.
-	if lbl, exists := lbls[labels.LabelKeyFixedIdentity]; exists {
+	if lbl, exists := lbls.GetLabel(labels.LabelKeyFixedIdentity); exists {
 		// If the set of labels contain a fixed identity then and exists in
 		// the map of reserved IDs then return the identity of that reserved ID.
-		id := GetReservedID(lbl.Value)
+		id := GetReservedID(lbl.Value())
 		if id != IdentityUnknown && IsUserReservedIdentity(id) {
 			return LookupReservedIdentity(id)
 		}
@@ -301,11 +279,11 @@ func LookupReservedIdentityByLabels(lbls labels.Labels) *Identity {
 	// So, we make sure the set of labels only contains a single label and
 	// that label is of the reserved type. This is to prevent users from
 	// adding cilium-reserved labels into the workloads.
-	if len(lbls) != 1 {
+	if lbls.Len() != 1 {
 		return nil
 	}
 
-	nid = GetReservedID(lbls.ToSlice()[0].Key)
+	nid = GetReservedID(lbls.ToSlice()[0].Key())
 	if nid != IdentityUnknown && !IsUserReservedIdentity(nid) {
 		return LookupReservedIdentity(nid)
 	}

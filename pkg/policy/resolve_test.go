@@ -23,13 +23,11 @@ import (
 
 var (
 	fooLabel = labels.NewLabel("k8s:foo", "", "")
-	lbls     = labels.Labels{
-		"foo": fooLabel,
-	}
+	lbls     = labels.NewLabels(fooLabel)
+
 	fooIdentity = &identity.Identity{
-		ID:         303,
-		Labels:     lbls,
-		LabelArray: lbls.LabelArray(),
+		ID:     303,
+		Labels: lbls,
 	}
 )
 
@@ -65,18 +63,16 @@ func generateNumIdentities(numIdentities int) identity.IdentityMap {
 		namespaceLabel := labels.NewLabel("io.kubernetes.pod.namespace=monitoring", "", labels.LabelSourceK8s)
 		funLabel := labels.NewLabel("app=analytics-erneh", "", labels.LabelSourceK8s)
 
-		identityLabels := labels.Labels{
-			fmt.Sprintf("foo%d", i):                           identityLabel,
-			"k8s:io.cilium.k8s.policy.cluster=default":        clusterLabel,
-			"k8s:io.cilium.k8s.policy.serviceaccount=default": serviceAccountLabel,
-			"k8s:io.kubernetes.pod.namespace=monitoring":      namespaceLabel,
-			"k8s:app=analytics-erneh":                         funLabel,
-		}
+		identityLabels := labels.NewLabels(identityLabel,
+			clusterLabel,
+			serviceAccountLabel,
+			namespaceLabel,
+			funLabel)
 
 		bumpedIdentity := i + 1000
 		numericIdentity := identity.NumericIdentity(bumpedIdentity)
 
-		c[numericIdentity] = identityLabels.LabelArray()
+		c[numericIdentity] = identityLabels
 	}
 	return c
 }
@@ -184,10 +180,10 @@ func (td *testData) bootstrapRepo(ruleGenFunc func(int) (api.Rules, identity.Ide
 	wg := &sync.WaitGroup{}
 	// load in standard reserved identities
 	c := identity.IdentityMap{
-		fooIdentity.ID: fooIdentity.LabelArray,
+		fooIdentity.ID: fooIdentity.Labels,
 	}
 	identity.IterateReservedIdentities(func(ni identity.NumericIdentity, id *identity.Identity) {
-		c[ni] = id.Labels.LabelArray()
+		c[ni] = id.Labels
 	})
 	td.sc.UpdateIdentities(c, nil, wg)
 
@@ -259,11 +255,7 @@ func TestL7WithIngressWildcard(t *testing.T) {
 
 	td.bootstrapRepo(GenerateL3IngressRules, 1000, t)
 
-	idFooSelectLabelArray := labels.ParseSelectLabelArray("id=foo")
-	idFooSelectLabels := labels.Labels{}
-	for _, lbl := range idFooSelectLabelArray {
-		idFooSelectLabels[lbl.Key] = lbl
-	}
+	idFooSelectLabels := labels.NewSelectLabelsFromModel("id=foo")
 	fooIdentity := identity.NewIdentity(12345, idFooSelectLabels)
 	td.addIdentity(fooIdentity)
 
@@ -323,7 +315,7 @@ func TestL7WithIngressWildcard(t *testing.T) {
 								isRedirect:      true,
 							},
 						},
-						RuleOrigin: map[CachedSelector]labels.LabelArrayList{td.wildcardCachedSelector: {nil}},
+						RuleOrigin: map[CachedSelector]labels.LabelsList{td.wildcardCachedSelector: {labels.Empty}},
 					},
 				})},
 				Egress:        newL4DirectionPolicy(),
@@ -360,11 +352,7 @@ func TestL7WithLocalHostWildcard(t *testing.T) {
 
 	td.bootstrapRepo(GenerateL3IngressRules, 1000, t)
 
-	idFooSelectLabelArray := labels.ParseSelectLabelArray("id=foo")
-	idFooSelectLabels := labels.Labels{}
-	for _, lbl := range idFooSelectLabelArray {
-		idFooSelectLabels[lbl.Key] = lbl
-	}
+	idFooSelectLabels := labels.NewSelectLabelsFromModel("id=foo")
 
 	fooIdentity := identity.NewIdentity(12345, idFooSelectLabels)
 	td.addIdentity(fooIdentity)
@@ -434,7 +422,7 @@ func TestL7WithLocalHostWildcard(t *testing.T) {
 							},
 							cachedSelectorHost: nil,
 						},
-						RuleOrigin: map[CachedSelector]labels.LabelArrayList{td.wildcardCachedSelector: {nil}},
+						RuleOrigin: map[CachedSelector]labels.LabelsList{td.wildcardCachedSelector: {labels.Empty}},
 					},
 				})},
 				Egress:        newL4DirectionPolicy(),
@@ -470,16 +458,12 @@ func TestMapStateWithIngressWildcard(t *testing.T) {
 	repo := td.repo
 	td.bootstrapRepo(GenerateL3IngressRules, 1000, t)
 
-	ruleLabel := labels.ParseLabelArray("rule-foo-allow-port-80")
-	ruleLabelAllowAnyEgress := labels.LabelArray{
+	ruleLabel := labels.ParseLabels("rule-foo-allow-port-80")
+	ruleLabelAllowAnyEgress := labels.NewLabels(
 		labels.NewLabel(LabelKeyPolicyDerivedFrom, LabelAllowAnyEgress, labels.LabelSourceReserved),
-	}
+	)
 
-	idFooSelectLabelArray := labels.ParseSelectLabelArray("id=foo")
-	idFooSelectLabels := labels.Labels{}
-	for _, lbl := range idFooSelectLabelArray {
-		idFooSelectLabels[lbl.Key] = lbl
-	}
+	idFooSelectLabels := labels.NewSelectLabelsFromModel("id=foo")
 	fooIdentity := identity.NewIdentity(12345, idFooSelectLabels)
 	td.addIdentity(fooIdentity)
 
@@ -532,7 +516,7 @@ func TestMapStateWithIngressWildcard(t *testing.T) {
 						PerSelectorPolicies: L7DataMap{
 							td.wildcardCachedSelector: nil,
 						},
-						RuleOrigin: map[CachedSelector]labels.LabelArrayList{td.wildcardCachedSelector: {ruleLabel}},
+						RuleOrigin: map[CachedSelector]labels.LabelsList{td.wildcardCachedSelector: {ruleLabel}},
 					},
 				})},
 				Egress: newL4DirectionPolicy(),
@@ -549,7 +533,7 @@ func TestMapStateWithIngressWildcard(t *testing.T) {
 
 	// Add new identity to test accumulation of MapChanges
 	added1 := identity.IdentityMap{
-		identity.NumericIdentity(192): labels.ParseSelectLabelArray("id=resolve_test_1"),
+		identity.NumericIdentity(192): labels.NewSelectLabelsFromModel("id=resolve_test_1"),
 	}
 	wg := &sync.WaitGroup{}
 	td.sc.UpdateIdentities(added1, nil, wg)
@@ -577,16 +561,12 @@ func TestMapStateWithIngress(t *testing.T) {
 	repo := td.repo
 	td.bootstrapRepo(GenerateL3IngressRules, 1000, t)
 
-	ruleLabel := labels.ParseLabelArray("rule-world-allow-port-80")
-	ruleLabelAllowAnyEgress := labels.LabelArray{
+	ruleLabel := labels.ParseLabels("rule-world-allow-port-80")
+	ruleLabelAllowAnyEgress := labels.NewLabels(
 		labels.NewLabel(LabelKeyPolicyDerivedFrom, LabelAllowAnyEgress, labels.LabelSourceReserved),
-	}
+	)
 
-	idFooSelectLabelArray := labels.ParseSelectLabelArray("id=foo")
-	idFooSelectLabels := labels.Labels{}
-	for _, lbl := range idFooSelectLabelArray {
-		idFooSelectLabels[lbl.Key] = lbl
-	}
+	idFooSelectLabels := labels.NewSelectLabelsFromModel("id=foo")
 	fooIdentity := identity.NewIdentity(12345, idFooSelectLabels)
 	td.addIdentity(fooIdentity)
 
@@ -641,9 +621,9 @@ func TestMapStateWithIngress(t *testing.T) {
 
 	// Add new identity to test accumulation of MapChanges
 	added1 := identity.IdentityMap{
-		identity.NumericIdentity(192): labels.ParseSelectLabelArray("id=resolve_test_1", "num=1"),
-		identity.NumericIdentity(193): labels.ParseSelectLabelArray("id=resolve_test_1", "num=2"),
-		identity.NumericIdentity(194): labels.ParseSelectLabelArray("id=resolve_test_1", "num=3"),
+		identity.NumericIdentity(192): labels.NewSelectLabelsFromModel("id=resolve_test_1", "num=1"),
+		identity.NumericIdentity(193): labels.NewSelectLabelsFromModel("id=resolve_test_1", "num=2"),
+		identity.NumericIdentity(194): labels.NewSelectLabelsFromModel("id=resolve_test_1", "num=3"),
 	}
 	wg := &sync.WaitGroup{}
 	td.sc.UpdateIdentities(added1, nil, wg)
@@ -651,7 +631,7 @@ func TestMapStateWithIngress(t *testing.T) {
 	require.Len(t, policy.policyMapChanges.synced, 3)
 
 	deleted1 := identity.IdentityMap{
-		identity.NumericIdentity(193): labels.ParseSelectLabelArray("id=resolve_test_1", "num=2"),
+		identity.NumericIdentity(193): labels.NewSelectLabelsFromModel("id=resolve_test_1", "num=2"),
 	}
 	wg = &sync.WaitGroup{}
 	td.sc.UpdateIdentities(nil, deleted1, wg)
@@ -698,7 +678,7 @@ func TestMapStateWithIngress(t *testing.T) {
 								CanShortCircuit: true,
 							},
 						},
-						RuleOrigin: map[CachedSelector]labels.LabelArrayList{
+						RuleOrigin: map[CachedSelector]labels.LabelsList{
 							cachedSelectorWorld:   {ruleLabel},
 							cachedSelectorWorldV4: {ruleLabel},
 							cachedSelectorWorldV6: {ruleLabel},

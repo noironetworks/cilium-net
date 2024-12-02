@@ -116,7 +116,7 @@ func (f *MockIdentityAllocator) AllocateIdentity(_ context.Context, lbls labels.
 		f.nextIDs[scope]++
 	}
 
-	f.IdentityMap[identity.NumericIdentity(id)] = lbls.LabelArray()
+	f.IdentityMap[identity.NumericIdentity(id)] = lbls
 	f.labelsToIdentity[lbls.String()] = int(id)
 
 	realID := &identity.Identity{
@@ -124,7 +124,6 @@ func (f *MockIdentityAllocator) AllocateIdentity(_ context.Context, lbls labels.
 		Labels:         lbls,
 		ReferenceCount: 1,
 	}
-	realID.Sanitize() // copy Labels to LabelArray
 	f.idToIdentity[int(id)] = realID
 
 	return realID, true, nil

@@ -186,7 +186,7 @@ func labelSelectorToRequirements(labelSelector *slim_metav1.LabelSelector) *k8sL
 func NewESFromLabels(lbls ...labels.Label) EndpointSelector {
 	ml := map[string]string{}
 	for _, lbl := range lbls {
-		ml[lbl.GetExtendedKey()] = lbl.Value
+		ml[lbl.GetExtendedKey()] = lbl.Value()
 	}
 
 	return NewESFromMatchRequirements(ml, nil)
@@ -312,8 +312,9 @@ func (n *EndpointSelector) Matches(lblsToMatch k8sLbls.Labels) bool {
 			return false
 		}
 	}
-	for _, req := range *n.requirements {
-		if !req.Matches(lblsToMatch) {
+	reqs := *n.requirements
+	for i := range reqs {
+		if !reqs[i].Matches(lblsToMatch) {
 			return false
 		}
 	}
@@ -369,7 +370,7 @@ func (s EndpointSelectorSlice) Less(i, j int) bool {
 
 // Matches returns true if any of the EndpointSelectors in the slice match the
 // provided labels
-func (s EndpointSelectorSlice) Matches(ctx labels.LabelArray) bool {
+func (s EndpointSelectorSlice) Matches(ctx labels.Labels) bool {
 	for _, selector := range s {
 		if selector.Matches(ctx) {
 			return true

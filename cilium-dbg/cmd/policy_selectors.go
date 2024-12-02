@@ -44,11 +44,7 @@ var policyCacheGetCmd = &cobra.Command{
 				first := true
 				fmt.Fprintf(w, "%s", mapping.Selector)
 				if verbosePolicySelectors {
-					var lstr string
-					if len(lbls) != 0 {
-						lstr = lbls.Sort().String()
-					}
-					fmt.Fprintf(w, "\t%s", lstr)
+					fmt.Fprintf(w, "\t%s", lbls.String())
 				} else {
 					fmt.Fprintf(w, "\t%s", getNameAndNamespaceFromLabels(lbls))
 				}
@@ -71,24 +67,20 @@ var policyCacheGetCmd = &cobra.Command{
 	},
 }
 
-func getNameAndNamespaceFromLabels(lbls labels.LabelArray) string {
-	ns := lbls.Get(labels.LabelSourceK8sKeyPrefix + k8sconst.PolicyLabelNamespace)
+func getNameAndNamespaceFromLabels(lbls labels.Labels) string {
+	ns := lbls.GetValue(labels.LabelSourceK8sKeyPrefix + k8sconst.PolicyLabelNamespace)
 	if ns == "" {
 		return ""
 	}
-	return ns + "/" + lbls.Get(labels.LabelSourceK8sKeyPrefix+k8sconst.PolicyLabelName)
+	return ns + "/" + lbls.GetValue(labels.LabelSourceK8sKeyPrefix+k8sconst.PolicyLabelName)
 }
 
-func constructLabelsArrayFromAPIType(in models.LabelArray) labels.LabelArray {
-	lbls := make(labels.LabelArray, 0, len(in))
+func constructLabelsArrayFromAPIType(in models.LabelArray) labels.Labels {
+	lbls := make([]labels.Label, 0, len(in))
 	for _, l := range in {
-		lbls = append(lbls, labels.Label{
-			Key:    l.Key,
-			Value:  l.Value,
-			Source: l.Source,
-		})
+		lbls = append(lbls, labels.NewLabel(l.Key, l.Value, l.Source))
 	}
-	return lbls
+	return labels.NewLabels(lbls...)
 }
 
 func init() {

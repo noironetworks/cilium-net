@@ -965,7 +965,6 @@ func parseEndpoint(ctx context.Context, owner regeneration.Owner, policyGetter p
 	if ep.SecurityIdentity == nil {
 		ep.SecurityIdentity = identity.LookupReservedIdentity(identity.ReservedIdentityInit)
 	}
-	ep.SecurityIdentity.Sanitize()
 
 	ep.UpdateLogger(nil)
 
@@ -1145,12 +1144,10 @@ func (e *Endpoint) HasLabels(l labels.Labels) bool {
 // return 'false' if any label in l is not in the endpoint's labels.
 // e.mutex must be RLock()ed.
 func (e *Endpoint) hasLabelsRLocked(l labels.Labels) bool {
-	allEpLabels := e.OpLabels.AllLabels()
-
-	for _, v := range l {
+	for v := range l.All() {
 		found := false
-		for _, j := range allEpLabels {
-			if j.Equals(&v) {
+		for j := range e.OpLabels.AllLabels() {
+			if j.Equal(v) {
 				found = true
 				break
 			}
@@ -1169,7 +1166,7 @@ func (e *Endpoint) hasLabelsRLocked(l labels.Labels) bool {
 // Passing a nil set of labels will not perform any action.
 // Must be called with e.mutex.Lock().
 func (e *Endpoint) replaceInformationLabels(sourceFilter string, l labels.Labels) {
-	if l == nil {
+	if l.IsEmpty() {
 		return
 	}
 	e.OpLabels.ReplaceInformationLabels(sourceFilter, l, e.getLogger())
@@ -1184,7 +1181,7 @@ func (e *Endpoint) replaceInformationLabels(sourceFilter string, l labels.Labels
 // current endpoint's identityRevision.
 // Must be called with e.mutex.Lock().
 func (e *Endpoint) replaceIdentityLabels(sourceFilter string, l labels.Labels) int {
-	if l == nil {
+	if l.IsEmpty() {
 		return e.identityRevision
 	}
 
@@ -1746,7 +1743,7 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
 
 	// copy the base labels into this local variable
 	// so that we don't override 'baseLabels'.
-	controllerBaseLabels := labels.NewFrom(baseLabels)
+	controllerBaseLabels := baseLabels
 
 	ns, podName := e.GetK8sNamespace(), e.GetK8sPodName()
 
@@ -1768,10 +1765,9 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
 		if !restoredEndpoint {
 			// Only mark the endpoint with the 'init' identity if we are not
 			// restoring the endpoint from a restart.
-			identityLabels := labels.Labels{
-				labels.IDNameInit: labels.NewLabel(labels.IDNameInit, "", labels.LabelSourceReserved),
-			}
-			regenTriggered := e.UpdateLabels(ctx, labels.LabelSourceAny, identityLabels, nil, true)
+			identityLabels := labels.NewLabels(labels.NewLabel(labels.IDNameInit, "", labels.LabelSourceReserved))
+
+			regenTriggered := e.UpdateLabels(ctx, labels.LabelSourceAny, identityLabels, labels.Empty, true)
 			if blocking {
 				return regenTriggered, err
 			}
@@ -1781,7 +1777,7 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
 
 	// Merge the labels retrieved from the 'resolveMetadata' into the base
 	// labels.
-	controllerBaseLabels.MergeLabels(k8sMetadata.IdentityLabels)
+	controllerBaseLabels = labels.Merge(controllerBaseLabels, k8sMetadata.IdentityLabels)
 
 	e.SetPod(pod)
 	e.SetK8sMetadata(k8sMetadata.ContainerPorts)
@@ -1806,7 +1802,7 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
 	// source as 'k8s' otherwise we will risk on replacing other labels that
 	// were added from other sources.
 	source := labels.LabelSourceK8s
-	if len(baseLabels) != 0 {
+	if baseLabels.Len() != 0 {
 		source = labels.LabelSourceAny
 	}
 	regenTriggered = e.UpdateLabels(ctx, source, controllerBaseLabels, k8sMetadata.InfoLabels, blocking)
@@ -1911,7 +1907,7 @@ func (e *Endpoint) RunMetadataResolver(restoredEndpoint, blocking bool, baseLabe
 // This assumes that after the initial successful resolution, other mechanisms
 // will handle updates (such as pkg/k8s/watchers informers).
 func (e *Endpoint) RunRestoredMetadataResolver(bwm dptypes.BandwidthManager, resolveMetadata MetadataResolverCB) {
-	e.RunMetadataResolver(true, false, nil, bwm, resolveMetadata)
+	e.RunMetadataResolver(true, false, labels.Empty, bwm, resolveMetadata)
 }
 
 // ModifyIdentityLabels changes the custom and orchestration identity labels of an endpoint.
@@ -1934,9 +1930,9 @@ func (e *Endpoint) ModifyIdentityLabels(source string, addLabels, delLabels labe
 	// label. This is a workaround to allow the cilium-docker plugin
 	// to remove endpoints in 'init' state if the containers were not
 	// started with any label.
-	if len(addLabels) == 0 && len(delLabels) == 0 && e.IsInit() {
+	if addLabels.Len() == 0 && delLabels.Len() == 0 && e.IsInit() {
 		idLabls := e.OpLabels.IdentityLabels()
-		delete(idLabls, labels.IDNameInit)
+		idLabls = idLabls.RemoveKeys(labels.IDNameInit)
 		e.replaceIdentityLabels(source, idLabls)
 		changed = true
 	}
@@ -1960,7 +1956,7 @@ func (e *Endpoint) ModifyIdentityLabels(source string, addLabels, delLabels labe
 // i.e. has the special identity with label reserved:init.
 func (e *Endpoint) IsInit() bool {
 	init, found := e.OpLabels.GetIdentityLabel(labels.IDNameInit)
-	return found && init.Source == labels.LabelSourceReserved
+	return found && init.Source() == labels.LabelSourceReserved
 }
 
 // InitWithIngressLabels initializes the endpoint with reserved:ingress.
@@ -1970,8 +1966,8 @@ func (e *Endpoint) InitWithIngressLabels(ctx context.Context, launchTime time.Du
 		return
 	}
 
-	epLabels := labels.Labels{}
-	epLabels.MergeLabels(labels.LabelIngress)
+	epLabels := labels.Empty
+	epLabels = labels.Merge(epLabels, labels.LabelIngress)
 
 	// Give the endpoint a security identity
 	newCtx, cancel := context.WithTimeout(ctx, launchTime)
@@ -1989,13 +1985,13 @@ func (e *Endpoint) InitWithNodeLabels(ctx context.Context, nodeLabels map[string
 		return
 	}
 
-	epLabels := labels.Labels{}
-	epLabels.MergeLabels(labels.LabelHost)
+	epLabels := labels.Empty
+	epLabels = labels.Merge(epLabels, labels.LabelHost)
 
 	// Initialize with known node labels.
 	newLabels := labels.Map2Labels(nodeLabels, labels.LabelSourceK8s)
 	newIdtyLabels, _ := labelsfilter.Filter(newLabels)
-	epLabels.MergeLabels(newIdtyLabels)
+	epLabels = labels.Merge(epLabels, newIdtyLabels)
 
 	// Give the endpoint a security identity
 	newCtx, cancel := context.WithTimeout(ctx, launchTime)
@@ -2055,13 +2051,13 @@ func (e *Endpoint) UpdateLabels(ctx context.Context, sourceFilter string, identi
 	//   replaced by the previous replaceIdentityLabels call.
 	// - the new identity labels don't contain the reserved:init label
 	// - the endpoint is in this init state.
-	if len(identityLabels) != 0 &&
+	if identityLabels.Len() != 0 &&
 		sourceFilter != labels.LabelSourceAny &&
 		!identityLabels.HasInitLabel() &&
 		e.IsInit() {
 
 		idLabls := e.OpLabels.IdentityLabels()
-		delete(idLabls, labels.IDNameInit)
+		idLabls = idLabls.RemoveKeys(labels.IDNameInit)
 		rev = e.replaceIdentityLabels(labels.LabelSourceAny, idLabls)
 	}
 
@@ -2174,7 +2170,7 @@ func (e *Endpoint) identityLabelsChanged(ctx context.Context) (regenTriggered bo
 		return false, nil
 	}
 
-	if e.SecurityIdentity != nil && e.SecurityIdentity.Labels.Equals(newLabels) {
+	if e.SecurityIdentity != nil && e.SecurityIdentity.Labels.Equal(newLabels) {
 		// Sets endpoint state to ready if was waiting for identity
 		if e.getState() == StateWaitingForIdentity {
 			e.setState(StateReady, "Set identity for this endpoint")

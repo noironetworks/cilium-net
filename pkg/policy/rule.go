@@ -333,7 +333,7 @@ func mergePortProto(ctx *SearchContext, existingFilter, filterToMerge *L4Filter,
 // forwarded to the proxy for endpoints matching those labels, but the proxy
 // will allow all such traffic.
 func mergeIngressPortProto(policyCtx PolicyContext, ctx *SearchContext, endpoints api.EndpointSelectorSlice, auth *api.Authentication, hostWildcardL7 []string,
-	r api.Ports, p api.PortProtocol, proto api.L4Proto, ruleLabels labels.LabelArray, resMap L4PolicyMap) (int, error) {
+	r api.Ports, p api.PortProtocol, proto api.L4Proto, ruleLabels labels.Labels, resMap L4PolicyMap) (int, error) {
 	// Create a new L4Filter
 	filterToMerge, err := createL4IngressFilter(policyCtx, endpoints, auth, hostWildcardL7, r, p, proto, ruleLabels)
 	if err != nil {
@@ -400,7 +400,7 @@ func rulePortsCoverSearchContext(ports []api.PortProtocol, ctx *SearchContext) b
 	return false
 }
 
-func mergeIngress(policyCtx PolicyContext, ctx *SearchContext, fromEndpoints api.EndpointSelectorSlice, auth *api.Authentication, toPorts, icmp api.PortsIterator, ruleLabels labels.LabelArray, resMap L4PolicyMap) (int, error) {
+func mergeIngress(policyCtx PolicyContext, ctx *SearchContext, fromEndpoints api.EndpointSelectorSlice, auth *api.Authentication, toPorts, icmp api.PortsIterator, ruleLabels labels.Labels, resMap L4PolicyMap) (int, error) {
 	found := 0
 
 	// short-circuit if no endpoint is selected
@@ -408,12 +408,12 @@ func mergeIngress(policyCtx PolicyContext, ctx *SearchContext, fromEndpoints api
 		return found, nil
 	}
 
-	if ctx.From != nil && len(fromEndpoints) > 0 {
+	if !ctx.From.IsEmpty() && len(fromEndpoints) > 0 {
 		if ctx.TraceEnabled() {
 			traceL3(ctx, fromEndpoints, "from", policyCtx.IsDeny())
 		}
 		if !fromEndpoints.Matches(ctx.From) {
-			ctx.PolicyTrace("      No label match for %s", ctx.From)
+			ctx.PolicyTrace("      No label match for [%s]", ctx.From)
 			return 0, nil
 		}
 		ctx.PolicyTrace("      Found all required labels")
@@ -544,7 +544,7 @@ func (state *traceState) selectRule(ctx *SearchContext, r *rule) {
 	state.selectedRules++
 }
 
-func (state *traceState) unSelectRule(ctx *SearchContext, labels labels.LabelArray, r *rule) {
+func (state *traceState) unSelectRule(ctx *SearchContext, labels labels.Labels, r *rule) {
 	ctx.PolicyTraceVerbose("  Rule %s: did not select %+v\n", r, labels)
 }
 
@@ -627,7 +627,7 @@ func (r *rule) matchesSubject(securityIdentity *identity.Identity) bool {
 	// Fall back to explicit label matching for the local node
 	// because local node has mutable labels, which are applied asynchronously to the SelectorCache.
 	if r.subjectSelector == nil || ruleSelectsNode {
-		return r.getSelector().Matches(securityIdentity.LabelArray)
+		return r.getSelector().Matches(securityIdentity.Labels)
 	}
 
 	return r.subjectSelector.Selects(versioned.Latest(), securityIdentity.ID)
@@ -635,7 +635,7 @@ func (r *rule) matchesSubject(securityIdentity *identity.Identity) bool {
 
 // ****************** EGRESS POLICY ******************
 
-func mergeEgress(policyCtx PolicyContext, ctx *SearchContext, toEndpoints api.EndpointSelectorSlice, auth *api.Authentication, toPorts, icmp api.PortsIterator, ruleLabels labels.LabelArray, resMap L4PolicyMap, fqdns api.FQDNSelectorSlice) (int, error) {
+func mergeEgress(policyCtx PolicyContext, ctx *SearchContext, toEndpoints api.EndpointSelectorSlice, auth *api.Authentication, toPorts, icmp api.PortsIterator, ruleLabels labels.Labels, resMap L4PolicyMap, fqdns api.FQDNSelectorSlice) (int, error) {
 	found := 0
 
 	// short-circuit if no endpoint is selected
@@ -643,12 +643,12 @@ func mergeEgress(policyCtx PolicyContext, ctx *SearchContext, toEndpoints api.En
 		return found, nil
 	}
 
-	if ctx.To != nil && len(toEndpoints) > 0 {
+	if !ctx.To.IsEmpty() && len(toEndpoints) > 0 {
 		if ctx.TraceEnabled() {
 			traceL3(ctx, toEndpoints, "to", policyCtx.IsDeny())
 		}
 		if !toEndpoints.Matches(ctx.To) {
-			ctx.PolicyTrace("      No label match for %s", ctx.To)
+			ctx.PolicyTrace("      No label match for [%s]", ctx.To)
 			return 0, nil
 		}
 		ctx.PolicyTrace("      Found all required labels")
@@ -760,7 +760,7 @@ func mergeEgress(policyCtx PolicyContext, ctx *SearchContext, toEndpoints api.En
 // being merged has conflicting L7 rules with those already in the provided
 // L4PolicyMap for the specified port-protocol tuple, it returns an error.
 func mergeEgressPortProto(policyCtx PolicyContext, ctx *SearchContext, endpoints api.EndpointSelectorSlice, auth *api.Authentication, r api.Ports, p api.PortProtocol,
-	proto api.L4Proto, ruleLabels labels.LabelArray, resMap L4PolicyMap, fqdns api.FQDNSelectorSlice) (int, error) {
+	proto api.L4Proto, ruleLabels labels.Labels, resMap L4PolicyMap, fqdns api.FQDNSelectorSlice) (int, error) {
 	// Create a new L4Filter
 	filterToMerge, err := createL4EgressFilter(policyCtx, endpoints, auth, r, p, proto, ruleLabels, fqdns)
 	if err != nil {

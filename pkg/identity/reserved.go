@@ -20,7 +20,7 @@ var (
 // label into the map of reserved identity cache, and returns the resulting Identity.
 // This identity must not be mutated!
 func AddReservedIdentity(ni NumericIdentity, lbl string) *Identity {
-	identity := NewIdentity(ni, labels.Labels{lbl: labels.NewLabel(lbl, "", labels.LabelSourceReserved)})
+	identity := NewIdentity(ni, labels.NewLabels(labels.NewLabel(lbl, "", labels.LabelSourceReserved)))
 	cacheMU.Lock()
 	reservedIdentityCache[ni] = identity
 	cacheMU.Unlock()
@@ -68,7 +68,7 @@ func ListReservedIdentities() IdentityMap {
 	defer cacheMU.RUnlock()
 	out := make(IdentityMap, len(reservedIdentityCache))
 	for ni, identity := range reservedIdentityCache {
-		out[ni] = identity.LabelArray
+		out[ni] = identity.Labels
 	}
 	return out
 }

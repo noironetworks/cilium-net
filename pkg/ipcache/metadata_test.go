@@ -116,15 +116,15 @@ func TestInjectLabels(t *testing.T) {
 	assert.NotNil(t, id1)
 	assert.True(t, id1.Labels.HasRemoteNodeLabel())
 	assert.True(t, id1.Labels.HasKubeAPIServerLabel())
-	assert.True(t, id1.Labels.Has(labels.ParseLabel("cidr:10.0.0.4/32")))
-	assert.False(t, id1.Labels.Has(labels.ParseLabel("cidr:10.0.0.5/32")))
+	assert.True(t, id1.Labels.HasLabel(labels.ParseLabel("cidr:10.0.0.4/32")))
+	assert.False(t, id1.Labels.HasLabel(labels.ParseLabel("cidr:10.0.0.5/32")))
 
 	id2 := IPIdentityCache.IdentityAllocator.LookupIdentityByID(ctx, nid2)
 	assert.NotNil(t, id2)
 	assert.True(t, id2.Labels.HasRemoteNodeLabel())
 	assert.False(t, id2.Labels.HasKubeAPIServerLabel())
-	assert.False(t, id2.Labels.Has(labels.ParseLabel("cidr:10.0.0.4/32")))
-	assert.True(t, id2.Labels.Has(labels.ParseLabel("cidr:10.0.0.5/32")))
+	assert.False(t, id2.Labels.HasLabel(labels.ParseLabel("cidr:10.0.0.4/32")))
+	assert.True(t, id2.Labels.HasLabel(labels.ParseLabel("cidr:10.0.0.5/32")))
 
 	// Remove remote-node label, ensure transition to local cidr identity space
 	IPIdentityCache.metadata.remove(inClusterPrefix, "node-uid", overrideIdentity(false), labels.LabelRemoteNode)
@@ -142,19 +142,19 @@ func TestInjectLabels(t *testing.T) {
 	assert.NotNil(t, id1)
 	assert.False(t, id1.Labels.HasRemoteNodeLabel())
 	assert.True(t, id1.Labels.HasKubeAPIServerLabel())
-	assert.True(t, id1.Labels.Has(labels.ParseLabel("cidr:10.0.0.4/32")))
-	assert.False(t, id1.Labels.Has(labels.ParseLabel("cidr:10.0.0.5/32")))
+	assert.True(t, id1.Labels.HasLabel(labels.ParseLabel("cidr:10.0.0.4/32")))
+	assert.False(t, id1.Labels.HasLabel(labels.ParseLabel("cidr:10.0.0.5/32")))
 
 	id2 = IPIdentityCache.IdentityAllocator.LookupIdentityByID(ctx, nid2)
 	assert.NotNil(t, id2)
 	assert.False(t, id2.Labels.HasRemoteNodeLabel())
 	assert.False(t, id2.Labels.HasKubeAPIServerLabel())
-	assert.False(t, id2.Labels.Has(labels.ParseLabel("cidr:10.0.0.4/32")))
-	assert.True(t, id2.Labels.Has(labels.ParseLabel("cidr:10.0.0.5/32")))
+	assert.False(t, id2.Labels.HasLabel(labels.ParseLabel("cidr:10.0.0.4/32")))
+	assert.True(t, id2.Labels.HasLabel(labels.ParseLabel("cidr:10.0.0.5/32")))
 
 	// Clean up.
-	IPIdentityCache.metadata.remove(inClusterPrefix, "node-uid-cidr", overrideIdentity(false), labels.Labels{})
-	IPIdentityCache.metadata.remove(inClusterPrefix2, "node-uid-cidr", overrideIdentity(false), labels.Labels{})
+	IPIdentityCache.metadata.remove(inClusterPrefix, "node-uid-cidr", overrideIdentity(false), labels.Empty)
+	IPIdentityCache.metadata.remove(inClusterPrefix2, "node-uid-cidr", overrideIdentity(false), labels.Empty)
 	IPIdentityCache.metadata.remove(inClusterPrefix, "kube-uid", overrideIdentity(false), labels.LabelKubeAPIServer)
 	remaining, err = IPIdentityCache.doInjectLabels(ctx, []netip.Prefix{inClusterPrefix, inClusterPrefix2})
 	assert.NoError(t, err)
@@ -251,15 +251,15 @@ func TestUpdateLocalNode(t *testing.T) {
 
 	ctx := context.Background()
 
-	bothLabels := labels.Labels{}
-	bothLabels.MergeLabels(labels.LabelHost)
-	bothLabels.MergeLabels(labels.LabelKubeAPIServer)
+	bothLabels := labels.Empty
+	bothLabels = labels.Merge(bothLabels, labels.LabelHost)
+	bothLabels = labels.Merge(bothLabels, labels.LabelKubeAPIServer)
 
 	selectorCacheHas := func(lbls labels.Labels) {
 		t.Helper()
 		id := PolicyHandler.identities[identity.ReservedIdentityHost]
 		assert.NotNil(t, id)
-		assert.Equal(t, lbls.LabelArray(), id)
+		assert.Equal(t, lbls, id)
 	}
 
 	injectLabels := func(ip netip.Prefix) {
@@ -372,7 +372,7 @@ func TestInjectExisting(t *testing.T) {
 	// Ensure the SelectorCache has the correct labels
 	selectorID := PolicyHandler.identities[id.ID]
 	assert.NotNil(t, selectorID)
-	assert.True(t, selectorID.Contains(labels.LabelKubeAPIServer.LabelArray()))
+	assert.True(t, selectorID.Contains(labels.LabelKubeAPIServer))
 }
 
 func TestFilterMetadataByLabels(t *testing.T) {
@@ -461,7 +461,7 @@ func TestRemoveLabelsFromIPs(t *testing.T) {
 	assert.Equal(t, 1, id.ReferenceCount) // CIDR policy is left
 
 	// Simulate removing CIDR policy.
-	IPIdentityCache.RemoveLabels(worldPrefix, labels.Labels{}, "policy-uid")
+	IPIdentityCache.RemoveLabels(worldPrefix, labels.Empty, "policy-uid")
 	remaining, err = IPIdentityCache.doInjectLabels(ctx, []netip.Prefix{worldPrefix})
 	assert.NoError(t, err)
 	assert.Empty(t, remaining)
@@ -658,7 +658,7 @@ func TestRequestIdentity(t *testing.T) {
 
 	// Add 2 prefixes in to the ipcache, one requesting the first local identity
 	IPIdentityCache.metadata.upsertLocked(inClusterPrefix, source.Restored, "daemon-uid", types.RequestedIdentity(identity.IdentityScopeLocal))
-	IPIdentityCache.metadata.upsertLocked(inClusterPrefix2, source.Restored, "daemon-uid", labels.Labels{})
+	IPIdentityCache.metadata.upsertLocked(inClusterPrefix2, source.Restored, "daemon-uid", labels.Empty)
 
 	// Withhold the first local-scoped identity in the allocator
 	IPIdentityCache.IdentityAllocator.WithholdLocalIdentities([]identity.NumericIdentity{16777216})
@@ -840,7 +840,7 @@ func TestUpsertMetadataInheritedCIDRPrefix(t *testing.T) {
 	require.Equal(t, id.ID, newID.ID)
 
 	// Removing the parent should update the child identities
-	prefixes = IPIdentityCache.metadata.remove(parent, "cidr-policy", labels.Labels{})
+	prefixes = IPIdentityCache.metadata.remove(parent, "cidr-policy", labels.Empty)
 	remaining, err = IPIdentityCache.doInjectLabels(ctx, prefixes)
 	assert.NoError(t, err)
 	assert.Empty(t, remaining)
@@ -873,8 +873,8 @@ func TestUpsertMetadataInheritedCIDRPrefix(t *testing.T) {
 	require.Equal(t, id.ID, newID.ID)
 
 	// Remove fqdn-lookups
-	prefixes = IPIdentityCache.metadata.remove(child, "fqdn-lookup", labels.Labels{})
-	prefixes = append(prefixes, IPIdentityCache.metadata.remove(sibling, "fqdn-lookup", labels.Labels{})...)
+	prefixes = IPIdentityCache.metadata.remove(child, "fqdn-lookup", labels.Empty)
+	prefixes = append(prefixes, IPIdentityCache.metadata.remove(sibling, "fqdn-lookup", labels.Empty)...)
 	remaining, err = IPIdentityCache.doInjectLabels(ctx, prefixes)
 	assert.NoError(t, err)
 	assert.Empty(t, remaining)
@@ -1097,12 +1097,12 @@ func setupTest(t *testing.T) (cleanup func()) {
 
 func newMockUpdater() *mockUpdater {
 	return &mockUpdater{
-		identities: make(map[identity.NumericIdentity]labels.LabelArray),
+		identities: make(map[identity.NumericIdentity]labels.Labels),
 	}
 }
 
 type mockUpdater struct {
-	identities map[identity.NumericIdentity]labels.LabelArray
+	identities map[identity.NumericIdentity]labels.Labels
 }
 
 func (m *mockUpdater) UpdateIdentities(added, deleted identity.IdentityMap, _ *sync.WaitGroup) {
@@ -1179,52 +1179,52 @@ func Test_metadata_mergeParentLabels(t *testing.T) {
 		{
 			name: "match first cidr parent",
 			existing: map[string]labels.Labels{
-				"1.1.1.1/32": labels.ParseLabelArray("fqdn:example.com").Labels(),
+				"1.1.1.1/32": labels.ParseLabels("fqdn:example.com"),
 				"1.1.0.0/16": labels.GetCIDRLabels(netip.MustParsePrefix("1.1.0.0/16")),
 				"1.0.0.0/8":  labels.GetCIDRLabels(netip.MustParsePrefix("1.0.0.0/8")),
 			},
 			prefix:     "1.1.1.1/32",
-			wantLabels: labels.ParseLabelArray("reserved:world-ipv4", "cidr:1.1.0.0/16", "fqdn:example.com").Labels(),
+			wantLabels: labels.ParseLabels("reserved:world-ipv4", "cidr:1.1.0.0/16", "fqdn:example.com"),
 		},
 
 		{
 			name: "merge all parent labelsl",
 			existing: map[string]labels.Labels{
-				"1.1.1.1/32": labels.ParseLabelArray("fqdn:example.com").Labels(),
-				"1.1.0.0/16": labels.ParseLabelArray("cidr:1.1.0.0/16", "reserved:world-ipv4", "cidrgroup:foo").Labels(),
-				"1.2.0.0/16": labels.ParseLabelArray("cidr:1.1.0.0/16", "reserved:world-ipv4", "cidrgroup:do-not-want").Labels(),
-				"1.0.0.0/8":  labels.ParseLabelArray("cidr:1.0.0.0/8", "reserved:world-ipv4", "cidrgroup:bar").Labels(),
+				"1.1.1.1/32": labels.ParseLabels("fqdn:example.com"),
+				"1.1.0.0/16": labels.ParseLabels("cidr:1.1.0.0/16", "reserved:world-ipv4", "cidrgroup:foo"),
+				"1.2.0.0/16": labels.ParseLabels("cidr:1.1.0.0/16", "reserved:world-ipv4", "cidrgroup:do-not-want"),
+				"1.0.0.0/8":  labels.ParseLabels("cidr:1.0.0.0/8", "reserved:world-ipv4", "cidrgroup:bar"),
 			},
 			prefix:     "1.1.1.1/32",
-			wantLabels: labels.ParseLabelArray("reserved:world-ipv4", "cidr:1.1.0.0/16", "fqdn:example.com", "cidrgroup:foo", "cidrgroup:bar").Labels(),
+			wantLabels: labels.ParseLabels("reserved:world-ipv4", "cidr:1.1.0.0/16", "fqdn:example.com", "cidrgroup:foo", "cidrgroup:bar"),
 		},
 
 		{
 			name: "longest-match wins",
 			existing: map[string]labels.Labels{
-				"1.1.1.1/32": labels.ParseLabelArray("fqdn:example.com").Labels(),
-				"1.1.0.0/16": labels.ParseLabelArray("cidr:1.1.0.0/16", "reserved:world-ipv4", "cidrgroup:foo=yes").Labels(),
-				"1.0.0.0/8":  labels.ParseLabelArray("cidr:1.0.0.0/8", "reserved:world-ipv4", "cidrgroup:foo=no", "cidrgroup:bar").Labels(),
+				"1.1.1.1/32": labels.ParseLabels("fqdn:example.com"),
+				"1.1.0.0/16": labels.ParseLabels("cidr:1.1.0.0/16", "reserved:world-ipv4", "cidrgroup:foo=yes"),
+				"1.0.0.0/8":  labels.ParseLabels("cidr:1.0.0.0/8", "reserved:world-ipv4", "cidrgroup:foo=no", "cidrgroup:bar"),
 			},
 			prefix:     "1.1.1.1/32",
-			wantLabels: labels.ParseLabelArray("reserved:world-ipv4", "cidr:1.1.0.0/16", "fqdn:example.com", "cidrgroup:foo=yes", "cidrgroup:bar").Labels(),
+			wantLabels: labels.ParseLabels("reserved:world-ipv4", "cidr:1.1.0.0/16", "fqdn:example.com", "cidrgroup:foo=yes", "cidrgroup:bar"),
 		},
 		{
 			name: "match for non-canonical prefix",
 			existing: map[string]labels.Labels{
-				"1.1.0.0/16": labels.ParseLabelArray("cidr:1.1.0.0/16", "reserved:world-ipv4", "cidrgroup:foo=yes").Labels(),
+				"1.1.0.0/16": labels.ParseLabels("cidr:1.1.0.0/16", "reserved:world-ipv4", "cidrgroup:foo=yes"),
 			},
 			prefix:     "::ffff:1.1.1.1/24",
-			wantLabels: labels.ParseLabelArray("reserved:world-ipv4", "cidr:1.1.0.0/16", "cidrgroup:foo=yes").Labels(),
+			wantLabels: labels.ParseLabels("reserved:world-ipv4", "cidr:1.1.0.0/16", "cidrgroup:foo=yes"),
 		},
 		{
 			name: "world",
 			existing: map[string]labels.Labels{
-				"1.1.0.0/16": labels.ParseLabelArray("cidr:1.1.0.0/16", "reserved:world-ipv4", "cidrgroup:foo=yes").Labels(),
-				"0.0.0.0/0":  labels.ParseLabelArray("cidrgroup:my-world-group").Labels(),
+				"1.1.0.0/16": labels.ParseLabels("cidr:1.1.0.0/16", "reserved:world-ipv4", "cidrgroup:foo=yes"),
+				"0.0.0.0/0":  labels.ParseLabels("cidrgroup:my-world-group"),
 			},
 			prefix:     "1.1.1.1/32",
-			wantLabels: labels.ParseLabelArray("reserved:world-ipv4", "cidr:1.1.0.0/16", "cidrgroup:foo=yes", "cidrgroup:my-world-group").Labels(),
+			wantLabels: labels.ParseLabels("reserved:world-ipv4", "cidr:1.1.0.0/16", "cidrgroup:foo=yes", "cidrgroup:my-world-group"),
 		},
 
 		{
@@ -1232,10 +1232,10 @@ func Test_metadata_mergeParentLabels(t *testing.T) {
 			existing: map[string]labels.Labels{
 				"fd00:ef::/48": labels.GetCIDRLabels(netip.MustParsePrefix("fd00:ef::/48")),
 				"fd00:ef::/56": labels.GetCIDRLabels(netip.MustParsePrefix("fd00:ef::/56")),
-				"fd00:ef::/40": labels.ParseLabelArray("cidrgroup:foo").Labels(),
+				"fd00:ef::/40": labels.ParseLabels("cidrgroup:foo"),
 			},
 			prefix:     ("fd00:ef::1/128"),
-			wantLabels: labels.ParseLabelArray("reserved:world-ipv6", "cidrgroup:foo", "cidr:fd00-ef--0/56").Labels(),
+			wantLabels: labels.ParseLabels("reserved:world-ipv6", "cidrgroup:foo", "cidr:fd00-ef--0/56"),
 		},
 	}
 	for _, tt := range tests {

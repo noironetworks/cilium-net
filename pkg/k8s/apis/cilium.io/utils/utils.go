@@ -51,9 +51,9 @@ var (
 )
 
 // GetPolicyLabels returns a LabelArray for the given namespace and name.
-func GetPolicyLabels(ns, name string, uid types.UID, derivedFrom string) labels.LabelArray {
+func GetPolicyLabels(ns, name string, uid types.UID, derivedFrom string) labels.Labels {
 	// Keep labels sorted by the key.
-	labelsArr := labels.LabelArray{
+	labelsArr := []labels.Label{
 		labels.NewLabel(k8sConst.PolicyLabelDerivedFrom, derivedFrom, labels.LabelSourceK8s),
 		labels.NewLabel(k8sConst.PolicyLabelName, name, labels.LabelSourceK8s),
 	}
@@ -65,7 +65,7 @@ func GetPolicyLabels(ns, name string, uid types.UID, derivedFrom string) labels.
 	}
 
 	srcLabel := labels.NewLabel(k8sConst.PolicyLabelUID, string(uid), labels.LabelSourceK8s)
-	return append(labelsArr, srcLabel)
+	return labels.NewLabels(append(labelsArr, srcLabel)...)
 }
 
 // getEndpointSelector converts the provided labelSelector into an EndpointSelector,
@@ -368,12 +368,12 @@ func ParseToCiliumRule(namespace, name string, uid types.UID, r *api.Rule) *api.
 // ParseToCiliumLabels returns all ruleLbls appended with a specific label that
 // represents the given namespace and name along with a label that specifies
 // these labels were derived from a CiliumNetworkPolicy.
-func ParseToCiliumLabels(namespace, name string, uid types.UID, ruleLbs labels.LabelArray) labels.LabelArray {
+func ParseToCiliumLabels(namespace, name string, uid types.UID, ruleLbs labels.Labels) labels.Labels {
 	resourceType := ResourceTypeCiliumNetworkPolicy
 	if namespace == "" {
 		resourceType = ResourceTypeCiliumClusterwideNetworkPolicy
 	}
 
 	policyLbls := GetPolicyLabels(namespace, name, uid, resourceType)
-	return append(policyLbls, ruleLbs...).Sort()
+	return labels.Merge(policyLbls, ruleLbs)
 }

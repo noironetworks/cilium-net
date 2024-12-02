@@ -165,7 +165,7 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *policy.AddOptions,
 					}
 				}
 			}
-			if len(opts.ReplaceWithLabels) > 0 {
+			if opts.ReplaceWithLabels.Len() > 0 {
 				oldRules := d.policy.SearchRLocked(opts.ReplaceWithLabels)
 				removedPrefixes = append(removedPrefixes, policy.GetCIDRPrefixes(oldRules)...)
 				if len(oldRules) > 0 {
@@ -342,7 +342,7 @@ func (r *PolicyReactionEvent) reactToRuleUpdates(epsToBumpRevision, epsToRegen *
 // PolicyDeleteEvent is a wrapper around deletion of policy rules with a given
 // set of labels from the policy repository in the daemon.
 type PolicyDeleteEvent struct {
-	labels labels.LabelArray
+	labels labels.Labels
 	opts   *policy.DeleteOptions
 	d      *Daemon
 }
@@ -364,7 +364,7 @@ type PolicyDeleteResult struct {
 // the policy repository of the daemon.
 // Returns the revision number and an error in case it was not possible to
 // delete the policy.
-func (d *Daemon) PolicyDelete(labels labels.LabelArray, opts *policy.DeleteOptions) (newRev uint64, err error) {
+func (d *Daemon) PolicyDelete(labels labels.Labels, opts *policy.DeleteOptions) (newRev uint64, err error) {
 	p := &PolicyDeleteEvent{
 		labels: labels,
 		opts:   opts,
@@ -384,7 +384,7 @@ func (d *Daemon) PolicyDelete(labels labels.LabelArray, opts *policy.DeleteOptio
 	return 0, fmt.Errorf("policy deletion event cancelled")
 }
 
-func (d *Daemon) policyDelete(labels labels.LabelArray, opts *policy.DeleteOptions, res chan interface{}) {
+func (d *Daemon) policyDelete(labels labels.Labels, opts *policy.DeleteOptions, res chan interface{}) {
 	log.WithField(logfields.IdentityLabels, logfields.Repr(labels)).Debug("Policy Delete Request")
 
 	d.policy.Lock()
@@ -424,7 +424,7 @@ func (d *Daemon) policyDelete(labels labels.LabelArray, opts *policy.DeleteOptio
 		// Return an error if a label filter was provided and there are no
 		// rules matching it. A deletion request for all policy entries should
 		// not fail if no policies are loaded.
-		if len(deletedRules) == 0 && len(labels) != 0 {
+		if len(deletedRules) == 0 && labels.Len() != 0 {
 			rev := d.policy.GetRevision()
 			d.policy.Unlock()
 
@@ -484,13 +484,13 @@ func (d *Daemon) policyDelete(labels labels.LabelArray, opts *policy.DeleteOptio
 }
 
 func deletePolicyHandler(d *Daemon, params DeletePolicyParams) middleware.Responder {
-	lbls := labels.ParseSelectLabelArrayFromArray(params.Labels)
+	lbls := labels.NewSelectLabelsFromModel(params.Labels...)
 	rev, err := d.PolicyDelete(lbls, &policy.DeleteOptions{Source: source.LocalAPI})
 	if err != nil {
 		return api.Error(DeletePolicyFailureCode, err)
 	}
 
-	ruleList := d.policy.SearchRLocked(labels.LabelArray{})
+	ruleList := d.policy.SearchRLocked(labels.Empty)
 	policy := &models.Policy{
 		Revision: int64(rev),
 		Policy:   policy.JSONMarshalRules(ruleList),
@@ -516,7 +516,7 @@ func putPolicyHandler(d *Daemon, params PutPolicyParams) middleware.Responder {
 	if params.Replace != nil {
 		replace = *params.Replace
 	}
-	replaceWithLabels := labels.ParseSelectLabelArrayFromArray(params.ReplaceWithLabels)
+	replaceWithLabels := labels.NewSelectLabelsFromModel(params.ReplaceWithLabels...)
 
 	rev, err := d.PolicyAdd(rules, &policy.AddOptions{
 		Replace:           replace,
@@ -541,12 +541,12 @@ func getPolicyHandler(d *Daemon, params GetPolicyParams) middleware.Responder {
 	repository.RLock()
 	defer repository.RUnlock()
 
-	lbls := labels.ParseSelectLabelArrayFromArray(params.Labels)
+	lbls := labels.NewSelectLabelsFromModel(params.Labels...)
 	ruleList := repository.SearchRLocked(lbls)
 
 	// Error if labels have been specified but no entries found, otherwise,
 	// return empty list
-	if len(ruleList) == 0 && len(lbls) != 0 {
+	if len(ruleList) == 0 && lbls.Len() != 0 {
 		return NewGetPolicyNotFound()
 	}
 

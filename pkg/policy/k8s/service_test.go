@@ -33,7 +33,7 @@ import (
 
 type fakePolicyManager struct {
 	OnPolicyAdd    func(rules api.Rules, opts *policy.AddOptions) (newRev uint64, err error)
-	OnPolicyDelete func(labels labels.LabelArray, opts *policy.DeleteOptions) (newRev uint64, err error)
+	OnPolicyDelete func(labels labels.Labels, opts *policy.DeleteOptions) (newRev uint64, err error)
 }
 
 func (f *fakePolicyManager) PolicyAdd(rules api.Rules, opts *policy.AddOptions) (newRev uint64, err error) {
@@ -43,7 +43,7 @@ func (f *fakePolicyManager) PolicyAdd(rules api.Rules, opts *policy.AddOptions) 
 	panic("OnPolicyAdd(api.Rules, *policy.AddOptions) (uint64, error) was called and is not set!")
 }
 
-func (f *fakePolicyManager) PolicyDelete(labels labels.LabelArray, opts *policy.DeleteOptions) (newRev uint64, err error) {
+func (f *fakePolicyManager) PolicyDelete(labels labels.Labels, opts *policy.DeleteOptions) (newRev uint64, err error) {
 	if f.OnPolicyDelete != nil {
 		return f.OnPolicyDelete(labels, opts)
 	}
@@ -304,7 +304,7 @@ func TestPolicyWatcher_updateToServicesPolicies(t *testing.T) {
 
 	// Check that Spec was translated
 	assert.Len(t, rules[0].Egress, 1)
-	assert.Contains(t, rules[0].Labels, svcByNameLbl)
+	assert.True(t, rules[0].Labels.HasLabel(svcByNameLbl))
 	assert.Equal(t, svcByNameCNP.Spec.Egress[0].ToServices, rules[0].Egress[0].ToServices)
 	assert.Equal(t, api.CIDRRuleSlice{
 		addrToCIDRRule(fooEpAddr1.Addr()),
@@ -313,7 +313,7 @@ func TestPolicyWatcher_updateToServicesPolicies(t *testing.T) {
 
 	// Check that Specs was translated
 	assert.Len(t, rules[1].Egress, 1)
-	assert.Contains(t, rules[1].Labels, svcByNameLbl)
+	assert.True(t, rules[1].Labels.HasLabel(svcByNameLbl))
 	assert.Equal(t, svcByNameCNP.Specs[0].Egress[0].ToServices, rules[1].Egress[0].ToServices)
 	assert.Equal(t, api.CIDRRuleSlice{
 		addrToCIDRRule(fooEpAddr1.Addr()),
@@ -347,7 +347,7 @@ func TestPolicyWatcher_updateToServicesPolicies(t *testing.T) {
 	// Check that svcByNameCNP Spec (matching foo and bar) was translated
 	assert.Len(t, byNameRules, 2)
 	assert.Len(t, byNameRules[0].Egress, 1)
-	assert.Contains(t, byNameRules[0].Labels, svcByNameLbl)
+	assert.True(t, byNameRules[0].Labels.HasLabel(svcByNameLbl))
 	assert.Equal(t, svcByNameCNP.Spec.Egress[0].ToServices, byNameRules[0].Egress[0].ToServices)
 	assert.Equal(t, api.CIDRRuleSlice{
 		addrToCIDRRule(fooEpAddr1.Addr()),
@@ -357,7 +357,7 @@ func TestPolicyWatcher_updateToServicesPolicies(t *testing.T) {
 
 	// Check that svcByNameCNP Specs (matching only foo) was translated
 	assert.Len(t, byNameRules[1].Egress, 1)
-	assert.Contains(t, byNameRules[1].Labels, svcByNameLbl)
+	assert.True(t, byNameRules[1].Labels.HasLabel(svcByNameLbl))
 	assert.Equal(t, svcByNameCNP.Specs[0].Egress[0].ToServices, byNameRules[1].Egress[0].ToServices)
 	assert.Equal(t, api.CIDRRuleSlice{
 		addrToCIDRRule(fooEpAddr1.Addr()),
@@ -367,7 +367,7 @@ func TestPolicyWatcher_updateToServicesPolicies(t *testing.T) {
 	// Check that svcByLabelCNP Spec (matching only bar) was translated
 	assert.Len(t, byLabelRules, 1)
 	assert.Len(t, byLabelRules[0].Egress, 1)
-	assert.Contains(t, byLabelRules[0].Labels, svcByLabelLbl)
+	assert.True(t, byLabelRules[0].Labels.HasLabel(svcByLabelLbl))
 	assert.Equal(t, svcByLabelCNP.Spec.Egress[0].ToServices, byLabelRules[0].Egress[0].ToServices)
 	assert.Equal(t, api.CIDRRuleSlice{
 		addrToCIDRRule(barEpAddr.Addr()),
@@ -393,7 +393,7 @@ func TestPolicyWatcher_updateToServicesPolicies(t *testing.T) {
 
 	// Check that svcByNameCNP Spec (matching foo and bar) was translated
 	assert.Len(t, byNameRules[0].Egress, 1)
-	assert.Contains(t, byNameRules[0].Labels, svcByNameLbl)
+	assert.True(t, byNameRules[0].Labels.HasLabel(svcByNameLbl))
 	assert.Equal(t, svcByNameCNP.Spec.Egress[0].ToServices, byNameRules[0].Egress[0].ToServices)
 	assert.Equal(t, api.CIDRRuleSlice{
 		addrToCIDRRule(fooEpAddr1.Addr()),
@@ -402,7 +402,7 @@ func TestPolicyWatcher_updateToServicesPolicies(t *testing.T) {
 
 	// Check that Specs was translated (matching only foo) was translated
 	assert.Len(t, byNameRules[1].Egress, 1)
-	assert.Contains(t, byNameRules[1].Labels, svcByNameLbl)
+	assert.True(t, byNameRules[1].Labels.HasLabel(svcByNameLbl))
 	assert.Equal(t, svcByNameCNP.Specs[0].Egress[0].ToServices, byNameRules[1].Egress[0].ToServices)
 	assert.Equal(t, api.CIDRRuleSlice{
 		addrToCIDRRule(fooEpAddr1.Addr()),
@@ -434,7 +434,7 @@ func TestPolicyWatcher_updateToServicesPolicies(t *testing.T) {
 	// Check that svcByLabelCNP Spec no longer matches anything
 	assert.Len(t, byLabelRules, 1)
 	assert.Len(t, byLabelRules[0].Egress, 1)
-	assert.Contains(t, byLabelRules[0].Labels, svcByLabelLbl)
+	assert.True(t, byLabelRules[0].Labels.HasLabel(svcByLabelLbl))
 	assert.Equal(t, svcByLabelCNP.Spec.Egress[0].ToServices, byLabelRules[0].Egress[0].ToServices)
 	assert.Empty(t, byLabelRules[0].Egress[0].ToCIDRSet)
 
@@ -459,7 +459,7 @@ func TestPolicyWatcher_updateToServicesPolicies(t *testing.T) {
 	assert.Len(t, rules, 1)
 	// Check that Spec was translated
 	assert.Len(t, rules[0].Egress, 1)
-	assert.Contains(t, rules[0].Labels, svcByLabelLbl)
+	assert.True(t, rules[0].Labels.HasLabel(svcByLabelLbl))
 	assert.Len(t, rules[0].Egress[0].ToEndpoints, 1)
 
 	bazEndpointSelectors := api.NewESFromMatchRequirements(bazSvcLabels, nil)
@@ -493,7 +493,7 @@ func TestPolicyWatcher_updateToServicesPoliciesTransformToEndpoint(t *testing.T)
 			policyAdd <- rules
 			return 0, nil
 		},
-		OnPolicyDelete: func(labels labels.LabelArray, opts *policy.DeleteOptions) (newRev uint64, err error) {
+		OnPolicyDelete: func(labels labels.Labels, opts *policy.DeleteOptions) (newRev uint64, err error) {
 			policyDelete <- nil
 			return 0, nil
 		},
@@ -581,7 +581,7 @@ func TestPolicyWatcher_updateToServicesPoliciesTransformToEndpoint(t *testing.T)
 
 	// Check that Spec was translated
 	assert.Len(t, rules[0].Egress, 1)
-	assert.Contains(t, rules[0].Labels, svcByNameLbl)
+	assert.True(t, rules[0].Labels.HasLabel(svcByNameLbl))
 	assert.Equal(t, svcByNameCNP.Spec.Egress[0].ToServices, rules[0].Egress[0].ToServices)
 	assert.Len(t, rules[0].Egress[0].ToEndpoints, 1)
 

@@ -23,18 +23,18 @@ import (
 // scIdentity is the information we need about a an identity that rules can select
 type scIdentity struct {
 	NID       identity.NumericIdentity
-	lbls      labels.LabelArray
+	lbls      labels.Labels
 	namespace string // value of the namespace label, or ""
 }
 
 // scIdentityCache is a cache of Identities keyed by the numeric identity
 type scIdentityCache map[identity.NumericIdentity]scIdentity
 
-func newIdentity(nid identity.NumericIdentity, lbls labels.LabelArray) scIdentity {
+func newIdentity(nid identity.NumericIdentity, lbls labels.Labels) scIdentity {
 	return scIdentity{
 		NID:       nid,
 		lbls:      lbls,
-		namespace: lbls.Get(labels.LabelSourceK8sKeyPrefix + k8sConst.PodNamespaceLabel),
+		namespace: lbls.GetValue(k8sConst.PodNamespaceLabel),
 	}
 }
 
@@ -130,7 +130,7 @@ func (sc *SelectorCache) GetModel() models.SelectorCache {
 			Selector:   selector,
 			Identities: ids,
 			Users:      int64(idSel.numUsers()),
-			Labels:     labelArrayToModel(idSel.GetMetadataLabels()),
+			Labels:     labelsToModel(idSel.GetMetadataLabels()),
 		}
 		selCacheMdl = append(selCacheMdl, selMdl)
 	}
@@ -165,16 +165,16 @@ func (sc *SelectorCache) Stats() selectorStats {
 	return result
 }
 
-func labelArrayToModel(arr labels.LabelArray) models.LabelArray {
-	lbls := make(models.LabelArray, 0, len(arr))
-	for _, l := range arr {
-		lbls = append(lbls, &models.Label{
-			Key:    l.Key,
-			Value:  l.Value,
-			Source: l.Source,
+func labelsToModel(lbls labels.Labels) models.LabelArray {
+	model := make(models.LabelArray, 0, lbls.Len())
+	for l := range lbls.All() {
+		model = append(model, &models.Label{
+			Key:    l.Key(),
+			Value:  l.Value(),
+			Source: l.Source(),
 		})
 	}
-	return lbls
+	return model
 }
 
 func (sc *SelectorCache) handleUserNotifications() {
@@ -322,7 +322,7 @@ type identityNotifier interface {
 // AddFQDNSelector adds the given api.FQDNSelector in to the selector cache. If
 // an identical EndpointSelector has already been cached, the corresponding
 // types.CachedSelector is returned, otherwise one is created and added to the cache.
-func (sc *SelectorCache) AddFQDNSelector(user CachedSelectionUser, lbls labels.LabelArray, fqdnSelec api.FQDNSelector) (cachedSelector types.CachedSelector, added bool) {
+func (sc *SelectorCache) AddFQDNSelector(user CachedSelectionUser, lbls labels.Labels, fqdnSelec api.FQDNSelector) (cachedSelector types.CachedSelector, added bool) {
 	key := fqdnSelec.String()
 
 	sc.mutex.Lock()
@@ -345,7 +345,7 @@ func (sc *SelectorCache) AddFQDNSelector(user CachedSelectionUser, lbls labels.L
 }
 
 // must hold lock for writing
-func (sc *SelectorCache) addSelectorLocked(user CachedSelectionUser, lbls labels.LabelArray, key string, source selectorSource) (types.CachedSelector, bool) {
+func (sc *SelectorCache) addSelectorLocked(user CachedSelectionUser, lbls labels.Labels, key string, source selectorSource) (types.CachedSelector, bool) {
 	idSel := &identitySelector{
 		key:              key,
 		users:            make(map[CachedSelectionUser]struct{}),
@@ -393,7 +393,7 @@ func (sc *SelectorCache) FindCachedIdentitySelector(selector api.EndpointSelecto
 // selector cache. If an identical EndpointSelector has already been
 // cached, the corresponding types.CachedSelector is returned, otherwise one
 // is created and added to the cache.
-func (sc *SelectorCache) AddIdentitySelector(user types.CachedSelectionUser, lbls labels.LabelArray, selector api.EndpointSelector) (cachedSelector types.CachedSelector, added bool) {
+func (sc *SelectorCache) AddIdentitySelector(user types.CachedSelectionUser, lbls labels.Labels, selector api.EndpointSelector) (cachedSelector types.CachedSelector, added bool) {
 	// The key returned here may be different for equivalent
 	// labelselectors, if the selector's requirements are stored
 	// in different orders. When this happens we'll be tracking
@@ -502,7 +502,7 @@ func (sc *SelectorCache) UpdateIdentities(added, deleted identity.IdentityMap, w
 			// order is different, but identity labels are
 			// sorted for the kv-store, so there should
 			// not be too many false negatives.
-			if lbls.Equals(old.lbls) {
+			if lbls.Equal(old.lbls) {
 				log.WithFields(logrus.Fields{
 					logfields.NewVersion: txn,
 					logfields.Identity:   numericID,

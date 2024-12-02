@@ -56,8 +56,8 @@ type SearchContext struct {
 	Trace   Tracing
 	Depth   int
 	Logging *stdlog.Logger
-	From    labels.LabelArray
-	To      labels.LabelArray
+	From    labels.Labels
+	To      labels.Labels
 	DPorts  []*models.Port
 	// rulesSelect specifies whether or not to check whether a rule which is
 	// being analyzed using this SearchContext matches either From or To.
@@ -67,13 +67,13 @@ type SearchContext struct {
 }
 
 func (s *SearchContext) String() string {
-	from := make([]string, 0, len(s.From))
-	to := make([]string, 0, len(s.To))
+	from := make([]string, 0, s.From.Len())
+	to := make([]string, 0, s.To.Len())
 	dports := make([]string, 0, len(s.DPorts))
-	for _, fromLabel := range s.From {
+	for fromLabel := range s.From.All() {
 		from = append(from, fromLabel.String())
 	}
-	for _, toLabel := range s.To {
+	for toLabel := range s.To.All() {
 		to = append(to, toLabel.String())
 	}
 	// We should avoid to use `fmt.Sprintf()` since

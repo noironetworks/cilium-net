@@ -295,7 +295,7 @@ func (n *NameManager) CompleteBootstrap() {
 				Source:   source.Restored,
 				Resource: restorationIPCacheResource,
 				Metadata: []ipcache.IPMetadata{
-					labels.Labels{}, // remove restored labels
+					labels.Empty, // remove restored labels
 				},
 			})
 		}
@@ -353,7 +353,7 @@ func (n *NameManager) updateDNSIPs(lookupTime time.Time, updatedDNSIPs map[strin
 
 		updatedMetadata[dnsName] = nameMetadata{
 			addrs:  lookupIPs.IPs,
-			labels: nameLabels,
+			labels: labels.NewLabels(nameLabels...),
 		}
 	}
 
@@ -427,7 +427,7 @@ func (n *NameManager) updateMetadata(nameToMetadata map[string]nameMetadata) (ip
 
 		// If labels are empty (i.e. this domain is no longer selected),
 		// then we want to the labels of our resource owner
-		if len(metadata.labels) > 0 {
+		if metadata.labels.Len() > 0 {
 			ipcacheUpserts = append(ipcacheUpserts, updates...)
 		} else {
 			ipcacheRemovals = append(ipcacheRemovals, updates...)
@@ -462,7 +462,7 @@ func (n *NameManager) maybeRemoveMetadata(maybeRemoved map[netip.Addr][]string) 
 					Source:   source.Generated,
 					Resource: ipcacheResource(name),
 					Metadata: []ipcache.IPMetadata{
-						labels.Labels{}, // remove all labels for this (ip, name) pair
+						labels.Empty, // remove all labels for this (ip, name) pair
 					},
 				})
 			}
@@ -510,13 +510,12 @@ type nameMetadata struct {
 
 // deriveLabelsForName derives what `fqdn:` labels we want to associate with
 // IPs for this DNS name, i.e. what selectors match the DNS name.
-func deriveLabelsForName(dnsName string, selectors map[api.FQDNSelector]*regexp.Regexp) labels.Labels {
-	lbls := labels.Labels{}
+func deriveLabelsForName(dnsName string, selectors map[api.FQDNSelector]*regexp.Regexp) []labels.Label {
+	lbls := []labels.Label{}
 	for fqdnSel, fqdnRegex := range selectors {
 		matches := fqdnRegex.MatchString(dnsName)
 		if matches {
-			l := fqdnSel.IdentityLabel()
-			lbls[l.Key] = l
+			lbls = append(lbls, fqdnSel.IdentityLabel())
 		}
 	}
 	return lbls
@@ -528,7 +527,7 @@ func deriveLabelsForNames(nameToIPs map[string][]netip.Addr, selectors map[api.F
 	for dnsName, addrs := range nameToIPs {
 		namesWithMetadata[dnsName] = nameMetadata{
 			addrs:  addrs,
-			labels: deriveLabelsForName(dnsName, selectors),
+			labels: labels.NewLabels(deriveLabelsForName(dnsName, selectors)...),
 		}
 	}
 	return namesWithMetadata

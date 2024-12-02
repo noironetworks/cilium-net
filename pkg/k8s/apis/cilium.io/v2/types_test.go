@@ -104,7 +104,9 @@ var (
 				},
 			},
 		},
-		Labels: labels.LabelArray{{Key: "uuid", Value: "98678-9868976-78687678887678", Source: ""}},
+		Labels: labels.NewLabels(
+			labels.NewLabel("uuid", "98678-9868976-78687678887678", ""),
+		),
 	}
 	uuidRule         = types.UID("98678-9868976-78687678887678")
 	expectedSpecRule = api.NewRule().

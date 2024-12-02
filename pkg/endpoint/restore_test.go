@@ -51,12 +51,9 @@ func (s *EndpointSuite) endpointCreator(id uint16, secID identity.NumericIdentit
 	binary.LittleEndian.PutUint16(b, id)
 
 	identity := &identity.Identity{
-		ID: secID,
-		Labels: labels.Labels{
-			"foo" + strID: labels.NewLabel("foo"+strID, "", ""),
-		},
+		ID:     secID,
+		Labels: labels.NewLabels(labels.NewLabel("foo"+strID, "", "")),
 	}
-	identity.Sanitize()
 
 	ep := NewTestEndpointWithState(s, s, testipcache.NewMockIPCache(), &FakeEndpointProxy{}, testidentity.NewMockIdentityAllocator(nil), ctmap.NewFakeGCRunner(), id, StateReady)
 	// Random network ID and docker endpoint ID with 59 hex chars + 5 strID = 64 hex chars

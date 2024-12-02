@@ -121,7 +121,7 @@ type PolicyRepository interface {
 
 	AddListLocked(rules api.Rules) (ruleSlice, uint64)
 	BumpRevision() uint64
-	DeleteByLabelsLocked(lbls labels.LabelArray) (ruleSlice, uint64, int)
+	DeleteByLabelsLocked(lbls labels.Labels) (ruleSlice, uint64, int)
 	DeleteByResourceLocked(rid ipcachetypes.ResourceID) (ruleSlice, uint64)
 	GetAuthTypes(localID identity.NumericIdentity, remoteID identity.NumericIdentity) AuthTypes
 	GetEnvoyHTTPRules(l7Rules *api.L7Rules, ns string) (*cilium.HttpNetworkPolicyRules, bool)
@@ -142,7 +142,7 @@ type PolicyRepository interface {
 	Iterate(f func(rule *api.Rule))
 	Release(rs ruleSlice)
 	ReplaceByResourceLocked(rules api.Rules, resource ipcachetypes.ResourceID) (newRules ruleSlice, oldRules ruleSlice, revision uint64)
-	SearchRLocked(lbls labels.LabelArray) api.Rules
+	SearchRLocked(lbls labels.Labels) api.Rules
 	SetEnvoyRulesFunc(f func(certificatemanager.SecretManager, *api.L7Rules, string, string) (*cilium.HttpNetworkPolicyRules, bool))
 	Start()
 }
@@ -346,7 +346,7 @@ func (p *Repository) Start() {
 func (p *Repository) ResolveL4IngressPolicy(ctx *SearchContext) (L4PolicyMap, error) {
 	policyCtx := policyContext{
 		repo: p,
-		ns:   ctx.To.Get(labels.LabelSourceK8sKeyPrefix + k8sConst.PodNamespaceLabel),
+		ns:   ctx.To.GetValue(k8sConst.PodNamespaceLabel),
 	}
 	rules := make(ruleSlice, 0, len(p.rules))
 	for _, rule := range p.rules {
@@ -377,7 +377,7 @@ func (p *Repository) ResolveL4IngressPolicy(ctx *SearchContext) (L4PolicyMap, er
 func (p *Repository) ResolveL4EgressPolicy(ctx *SearchContext) (L4PolicyMap, error) {
 	policyCtx := policyContext{
 		repo: p,
-		ns:   ctx.From.Get(labels.LabelSourceK8sKeyPrefix + k8sConst.PodNamespaceLabel),
+		ns:   ctx.From.GetValue(k8sConst.PodNamespaceLabel),
 	}
 	rules := make(ruleSlice, 0, len(p.rules))
 	for _, rule := range p.rules {
@@ -462,7 +462,7 @@ func (p *Repository) AllowsEgressRLocked(ctx *SearchContext) api.Decision {
 
 // SearchRLocked searches the policy repository for rules which match the
 // specified labels and will return an array of all rules which matched.
-func (p *Repository) SearchRLocked(lbls labels.LabelArray) api.Rules {
+func (p *Repository) SearchRLocked(lbls labels.Labels) api.Rules {
 	result := api.Rules{}
 
 	for _, r := range p.rules {
@@ -626,7 +626,7 @@ func (r ruleSlice) FindSelectedEndpoints(endpointsToBumpRevision, endpointsToReg
 // DeleteByLabelsLocked deletes all rules in the policy repository which
 // contain the specified labels. Returns the revision of the policy repository
 // after deleting the rules, as well as now many rules were deleted.
-func (p *Repository) DeleteByLabelsLocked(lbls labels.LabelArray) (ruleSlice, uint64, int) {
+func (p *Repository) DeleteByLabelsLocked(lbls labels.Labels) (ruleSlice, uint64, int) {
 	deletedRules := ruleSlice{}
 
 	for key, r := range p.rules {
@@ -662,7 +662,7 @@ func (p *Repository) DeleteByResourceLocked(rid ipcachetypes.ResourceID) (ruleSl
 
 // DeleteByLabels deletes all rules in the policy repository which contain the
 // specified labels
-func (p *Repository) DeleteByLabels(lbls labels.LabelArray) (uint64, int) {
+func (p *Repository) DeleteByLabels(lbls labels.Labels) (uint64, int) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	_, rev, numDeleted := p.DeleteByLabelsLocked(lbls)
@@ -683,7 +683,7 @@ func JSONMarshalRules(rules api.Rules) string {
 // rule with labels matching the labels in the provided LabelArray.
 //
 // Must be called with p.mutex held
-func (p *Repository) GetRulesMatching(lbls labels.LabelArray) (ingressMatch bool, egressMatch bool) {
+func (p *Repository) GetRulesMatching(lbls labels.Labels) (ingressMatch bool, egressMatch bool) {
 	ingressMatch = false
 	egressMatch = false
 	for _, r := range p.rules {
@@ -726,7 +726,7 @@ func (p *Repository) GetRulesList() *models.Policy {
 	p.mutex.RLock()
 	defer p.mutex.RUnlock()
 
-	lbls := labels.ParseSelectLabelArrayFromArray([]string{})
+	lbls := labels.Empty
 	ruleList := p.SearchRLocked(lbls)
 
 	return &models.Policy{
@@ -757,7 +757,7 @@ func (p *Repository) resolvePolicyLocked(securityIdentity *identity.Identity) (*
 		EgressPolicyEnabled:  egressEnabled,
 	}
 
-	lbls := securityIdentity.LabelArray
+	lbls := securityIdentity.Labels
 	ingressCtx := SearchContext{
 		To:          lbls,
 		rulesSelect: true,
@@ -775,7 +775,7 @@ func (p *Repository) resolvePolicyLocked(securityIdentity *identity.Identity) (*
 
 	policyCtx := policyContext{
 		repo: p,
-		ns:   lbls.Get(labels.LabelSourceK8sKeyPrefix + k8sConst.PodNamespaceLabel),
+		ns:   lbls.GetOrEmpty(k8sConst.PodNamespaceLabel).Value(),
 	}
 
 	if ingressEnabled {
@@ -809,10 +809,10 @@ func (p *Repository) computePolicyEnforcementAndRules(securityIdentity *identity
 	ingress, egress bool,
 	matchingRules ruleSlice,
 ) {
-	lbls := securityIdentity.LabelArray
+	lbls := securityIdentity.Labels
 
 	// Check if policy enforcement should be enabled at the daemon level.
-	if lbls.Has(labels.IDNameHost) && !option.Config.EnableHostFirewall {
+	if lbls.HasLabelWithKey(labels.IDNameHost) && !option.Config.EnableHostFirewall {
 		return false, false, nil
 	}
 
@@ -833,7 +833,7 @@ func (p *Repository) computePolicyEnforcementAndRules(securityIdentity *identity
 		}
 	}
 	// Match namespace-specific rules
-	namespace := lbls.Get(labels.LabelSourceK8sKeyPrefix + k8sConst.PodNamespaceLabel)
+	namespace := lbls.GetOrEmpty(k8sConst.PodNamespaceLabel).Value()
 	if namespace != "" {
 		for rKey := range p.rulesByNamespace[namespace] {
 			r := p.rules[rKey]
@@ -847,7 +847,7 @@ func (p *Repository) computePolicyEnforcementAndRules(securityIdentity *identity
 	// enabled for the endpoint.
 	// If the endpoint has the reserved:init label, i.e. if it has not yet
 	// received any labels, always enforce policy (default deny).
-	if policyMode == option.AlwaysEnforce || lbls.Has(labels.IDNameInit) {
+	if policyMode == option.AlwaysEnforce || lbls.HasLabelWithKey(labels.IDNameInit) {
 		return true, true, matchingRules
 	}
 
@@ -895,20 +895,20 @@ func (p *Repository) computePolicyEnforcementAndRules(securityIdentity *identity
 	// If there only ingress default-allow rules, then insert a wildcard rule
 	if !hasIngressDefaultDeny && ingress {
 		log.WithField(logfields.Identity, securityIdentity).Debug("Only default-allow policies, synthesizing ingress wildcard-allow rule")
-		matchingRules = append(matchingRules, wildcardRule(securityIdentity.LabelArray, true /*ingress*/))
+		matchingRules = append(matchingRules, wildcardRule(securityIdentity.Labels, true /*ingress*/))
 	}
 
 	// Same for egress -- synthesize a wildcard rule
 	if !hasEgressDefaultDeny && egress {
 		log.WithField(logfields.Identity, securityIdentity).Debug("Only default-allow policies, synthesizing egress wildcard-allow rule")
-		matchingRules = append(matchingRules, wildcardRule(securityIdentity.LabelArray, false /*egress*/))
+		matchingRules = append(matchingRules, wildcardRule(securityIdentity.Labels, false /*egress*/))
 	}
 
 	return
 }
 
 // wildcardRule generates a wildcard rule that only selects the given identity.
-func wildcardRule(lbls labels.LabelArray, ingress bool) *rule {
+func wildcardRule(lbls labels.Labels, ingress bool) *rule {
 	r := &rule{}
 
 	if ingress {
@@ -929,8 +929,8 @@ func wildcardRule(lbls labels.LabelArray, ingress bool) *rule {
 		}
 	}
 
-	es := api.NewESFromLabels(lbls...)
-	if lbls.Has(labels.IDNameHost) {
+	es := api.NewESFromLabels(lbls.ToSlice()...)
+	if lbls.HasLabelWithKey(labels.IDNameHost) {
 		r.NodeSelector = es
 	} else {
 		r.EndpointSelector = es
