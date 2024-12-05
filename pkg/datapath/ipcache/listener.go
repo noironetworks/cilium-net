@@ -134,8 +134,13 @@ func (l *BPFListener) OnIPIdentityCacheChange(modType ipcache.CacheModification,
 			// with the hostIP so that this traffic can be guided
 			// to a tunnel endpoint destination.
 			nodeIPv4 := node.GetIPv4()
-			if ip4 := newHostIP.To4(); ip4 != nil && !ip4.Equal(nodeIPv4) {
-				copy(value.TunnelEndpoint[:], ip4)
+			nodeIPv6 := node.GetIPv6()
+			if ip4 := newHostIP.To4(); ip4 != nil {
+				if !ip4.Equal(nodeIPv4) {
+					copy(value.TunnelEndpoint[:], ip4)
+				}
+			} else if !newHostIP.Equal(nodeIPv6) {
+				copy(value.TunnelEndpoint[:], newHostIP)
 			}
 		}
 		err := l.bpfMap.Update(&key, &value)
