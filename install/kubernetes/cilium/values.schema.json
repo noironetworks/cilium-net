@@ -3582,6 +3582,13 @@
     "identityChangeGracePeriod": {
       "type": "string"
     },
+    "identityManagementMode": {
+      "enum": [
+        "agent",
+        "operator",
+        "both"
+      ]
+    },
     "image": {
       "properties": {
         "digest": {
