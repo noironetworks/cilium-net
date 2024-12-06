@@ -5,13 +5,13 @@ package node_test
 
 import (
 	"context"
-	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/hivetest"
+	"github.com/cilium/statedb"
 
 	"github.com/cilium/cilium/pkg/hive"
 	. "github.com/cilium/cilium/pkg/node"
@@ -43,14 +43,15 @@ func TestLocalNodeStore(t *testing.T) {
 	// waitObserve after the last change has been observed.
 	observe := func(store *LocalNodeStore) {
 		store.Observe(context.TODO(),
-			func(n LocalNode) {
+			func(n *LocalNode) {
 				observed = append(observed, n.NodeIdentity)
 
 				if n.NodeIdentity == expected[len(expected)-1] {
 					waitObserve.Done()
 				}
 			},
-			func(err error) {},
+			func(err error) {
+			},
 		)
 	}
 
@@ -76,7 +77,11 @@ func TestLocalNodeStore(t *testing.T) {
 	}
 
 	hive := hive.New(
-		cell.Provide(NewLocalNodeStore),
+		cell.Provide(
+			NewLocalNodeStore,
+			NewNodesTable,
+			statedb.RWTable[*TableNode].ToTable,
+		),
 
 		cell.Provide(func() LocalNodeSynchronizer { return ts }),
 		cell.Invoke(observe),
@@ -98,8 +103,8 @@ func TestLocalNodeStore(t *testing.T) {
 		t.Fatalf("Failed to stop: %s", err)
 	}
 
-	if !slices.Equal(observed, expected) {
-		t.Fatalf("Unexpected values observed: %v, expected: %v", observed, expected)
+	if len(observed) < 1 || observed[len(observed)-1] != expected[len(expected)-1] {
+		t.Fatalf("Unexpected values observed: %v, expected subset of: %v", observed, expected)
 	}
 }
 

@@ -4,14 +4,12 @@
 package datapath
 
 import (
+	"context"
 	"fmt"
-	"log"
 	"log/slog"
-	"path/filepath"
 
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
-	"github.com/cilium/statedb"
 
 	"github.com/cilium/cilium/pkg/act"
 	"github.com/cilium/cilium/pkg/datapath/agentliveness"
@@ -19,7 +17,6 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/ipcache"
 	"github.com/cilium/cilium/pkg/datapath/iptables"
 	"github.com/cilium/cilium/pkg/datapath/l2responder"
-	"github.com/cilium/cilium/pkg/datapath/link"
 	linuxdatapath "github.com/cilium/cilium/pkg/datapath/linux"
 	"github.com/cilium/cilium/pkg/datapath/linux/bandwidth"
 	"github.com/cilium/cilium/pkg/datapath/linux/bigtcp"
@@ -42,10 +39,9 @@ import (
 	"github.com/cilium/cilium/pkg/maps/lbmap"
 	monitorAgent "github.com/cilium/cilium/pkg/monitor/agent"
 	"github.com/cilium/cilium/pkg/mtu"
-	"github.com/cilium/cilium/pkg/option"
+	nodeManager "github.com/cilium/cilium/pkg/node/manager"
 	"github.com/cilium/cilium/pkg/testutils/mockmaps"
 	wg "github.com/cilium/cilium/pkg/wireguard/agent"
-	wgTypes "github.com/cilium/cilium/pkg/wireguard/types"
 )
 
 // Datapath provides the privileged operations to apply control-plane
@@ -80,8 +76,6 @@ var Cell = cell.Module(
 
 	cell.Invoke(initDatapath),
 
-	cell.Provide(newWireguardAgent),
-
 	cell.Provide(func(expConfig experimental.Config) types.LBMap {
 		if expConfig.EnableExperimentalLB {
 			// The experimental control-plane is enabled. Use a fake LBMap
@@ -91,6 +85,9 @@ var Cell = cell.Module(
 
 		return lbmap.New()
 	}),
+
+	// Wireguard agent
+	wg.Cell,
 
 	// Provides the Table[NodeAddress] and the controller that populates it from Table[*Device]
 	tables.NodeAddressCell,
@@ -150,38 +147,23 @@ var Cell = cell.Module(
 	// Provides node handler, which handles node events.
 	cell.Provide(linuxdatapath.NewNodeHandler),
 	cell.Provide(node.NewNodeIDApiHandler),
+	cell.Invoke(func(jg job.Group, h types.NodeHandler, nm nodeManager.NodeManager) {
+		// FIXME: Subscribe() sends to an unbuffered channel, so one can only
+		// subscribe when NodeManager is running. Rethink or just factor out the
+		// Subscribe() altogether.
+		jg.Add(job.OneShot("node-handler-subscribe",
+			func(context.Context, cell.Health) error {
+				nm.Subscribe(h)
+				return nil
+			}))
+	}),
+	linuxdatapath.NodeReconcilerCell,
 
 	// Provides Active Connection Tracking metrics based on counts of
 	// opened (from BPF ACT map), closed (from BPF ACT map), and failed
 	// connections (from ctmap's GC).
 	act.Cell,
 )
-
-func newWireguardAgent(lc cell.Lifecycle, sysctl sysctl.Sysctl, health cell.Health, registry job.Registry, db *statedb.DB, mtuTable statedb.Table[mtu.RouteMTU]) *wg.Agent {
-	var wgAgent *wg.Agent
-	if option.Config.EnableWireguard {
-		if option.Config.EnableIPSec {
-			log.Fatalf("WireGuard (--%s) cannot be used with IPsec (--%s)",
-				option.EnableWireguard, option.EnableIPSecName)
-		}
-
-		jobGroup := registry.NewGroup(health)
-		lc.Append(jobGroup)
-
-		var err error
-		privateKeyPath := filepath.Join(option.Config.StateDir, wgTypes.PrivKeyFilename)
-		wgAgent, err = wg.NewAgent(privateKeyPath, sysctl, jobGroup, db, mtuTable)
-		if err != nil {
-			log.Fatalf("failed to initialize WireGuard: %s", err)
-		}
-
-		lc.Append(wgAgent)
-	} else {
-		// Delete WireGuard device from previous run (if such exists)
-		link.DeleteByName(wgTypes.IfaceName)
-	}
-	return wgAgent
-}
 
 func initDatapath(logger *slog.Logger, lifecycle cell.Lifecycle) {
 	lifecycle.Append(cell.Hook{

@@ -57,10 +57,6 @@ type k8sGetters interface {
 	GetCiliumNode(ctx context.Context, nodeName string) (*ciliumv2.CiliumNode, error)
 }
 
-type GetNodeAddresses interface {
-	GetNodeAddresses() []nodeTypes.Address
-}
-
 // NodeDiscovery represents a node discovery action
 type NodeDiscovery struct {
 	Manager               nodemanager.NodeManager
@@ -185,10 +181,9 @@ func (n *NodeDiscovery) StartDiscovery() {
 		}
 	}()
 
-	n.Manager.NodeUpdated(localNode.Node)
 	close(n.localStateInitialized)
 
-	n.updateLocalNode(&localNode)
+	n.updateLocalNode(localNode)
 
 	go func() {
 		// Propagate all updates to the CiliumNode and kvstore representations.
@@ -197,8 +192,7 @@ func (n *NodeDiscovery) StartDiscovery() {
 			// This is particularly helpful when an IPSec key rotation occurs
 			// and the manager needs to evaluate the local node's EncryptionKey
 			// field.
-			n.Manager.NodeUpdated(ln.Node)
-			n.updateLocalNode(&ln)
+			n.updateLocalNode(ln)
 		}
 	}()
 }
@@ -264,7 +258,7 @@ func (n *NodeDiscovery) UpdateCiliumNodeResource() {
 		log.Fatal("Could not retrieve the local node object")
 	}
 
-	n.updateCiliumNodeResource(&ln)
+	n.updateCiliumNodeResource(ln)
 }
 
 func (n *NodeDiscovery) updateCiliumNodeResource(ln *node.LocalNode) {
@@ -340,7 +334,7 @@ func (n *NodeDiscovery) mutateNodeResource(nodeResource *ciliumv2.CiliumNode, ln
 		APIVersion: "v1",
 		Kind:       "Node",
 		Name:       ln.Name,
-		UID:        ln.UID,
+		UID:        ln.Local.UID,
 	}}
 
 	nodeResource.ObjectMeta.Labels = ln.Labels
@@ -503,10 +497,10 @@ func (n *NodeDiscovery) mutateNodeResource(nodeResource *ciliumv2.CiliumNode, ln
 		nodeResource.Spec.ENI.NodeSubnetID = subnetID
 
 	case ipamOption.IPAMAzure:
-		if ln.ProviderID == "" {
+		if ln.Local.ProviderID == "" {
 			log.Fatal("Spec.ProviderID in k8s node resource must be set for Azure IPAM")
 		}
-		if !strings.HasPrefix(ln.ProviderID, azureTypes.ProviderPrefix) {
+		if !strings.HasPrefix(ln.Local.ProviderID, azureTypes.ProviderPrefix) {
 			log.Fatalf("Spec.ProviderID in k8s node resource must have prefix %s", azureTypes.ProviderPrefix)
 		}
 		// The Azure controller in Kubernetes creates a mix of upper
@@ -514,7 +508,7 @@ func (n *NodeDiscovery) mutateNodeResource(nodeResource *ciliumv2.CiliumNode, ln
 		// therefore not providing the exact representation of what is
 		// returned by the Azure API. Convert it to lower case for
 		// consistent results.
-		nodeResource.Spec.InstanceID = strings.ToLower(strings.TrimPrefix(ln.ProviderID, azureTypes.ProviderPrefix))
+		nodeResource.Spec.InstanceID = strings.ToLower(strings.TrimPrefix(ln.Local.ProviderID, azureTypes.ProviderPrefix))
 
 		if c := n.cniConfigManager.GetCustomNetConf(); c != nil {
 			if c.IPAM.MinAllocate != 0 {
