@@ -123,11 +123,7 @@ func (l *BPFListener) OnIPIdentityCacheChange(modType ipcache.CacheModification,
 
 	switch modType {
 	case ipcache.Upsert:
-		value := ipcacheMap.RemoteEndpointInfo{
-			SecurityIdentity: uint32(newID.ID),
-			Key:              encryptKey,
-		}
-
+		var tunnelEndpoint net.IP
 		if newHostIP != nil {
 			// If the hostIP is specified and it doesn't point to
 			// the local host, then the ipcache should be populated
@@ -137,12 +133,13 @@ func (l *BPFListener) OnIPIdentityCacheChange(modType ipcache.CacheModification,
 			nodeIPv6 := node.GetIPv6()
 			if ip4 := newHostIP.To4(); ip4 != nil {
 				if !ip4.Equal(nodeIPv4) {
-					copy(value.TunnelEndpoint[:], ip4)
+					tunnelEndpoint = newHostIP
 				}
 			} else if !newHostIP.Equal(nodeIPv6) {
-				copy(value.TunnelEndpoint[:], newHostIP)
+				tunnelEndpoint = newHostIP
 			}
 		}
+		value := ipcacheMap.NewValue(uint32(newID.ID), tunnelEndpoint, encryptKey, 0)
 		err := l.bpfMap.Update(&key, &value)
 		if err != nil {
 			scopedLog.WithError(err).WithFields(logrus.Fields{
