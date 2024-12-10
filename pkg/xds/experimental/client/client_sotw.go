@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package client
+package xdsclient
 
 import (
 	"context"
@@ -20,7 +20,6 @@ import (
 )
 
 type sotw struct {
-	node *corepb.Node
 }
 
 // sotw implements flavour in sotw protocol version.
@@ -33,7 +32,7 @@ func (sotw *sotw) transport(ctx context.Context, client discoverypb.AggregatedDi
 	return client.StreamAggregatedResources(ctx, grpc.WaitForReady(true))
 }
 
-func (sotw *sotw) prepareObsReq(obsReq *observeRequest, get getter) (*discoverypb.DiscoveryRequest, error) {
+func (sotw *sotw) prepareObsReq(obsReq *observeRequest, node *corepb.Node, get getter) (*discoverypb.DiscoveryRequest, error) {
 	curr, err := get(obsReq.typeUrl)
 	if err != nil {
 		return nil, fmt.Errorf("get resources: %w", err)
@@ -43,7 +42,7 @@ func (sotw *sotw) prepareObsReq(obsReq *observeRequest, get getter) (*discoveryp
 	reqResourceNames.Insert(obsReq.resourceNames...)
 
 	return &discoverypb.DiscoveryRequest{
-		Node:          sotw.node,
+		Node:          node,
 		TypeUrl:       obsReq.typeUrl,
 		ResourceNames: slices.Collect(maps.Keys(reqResourceNames)),
 	}, nil
@@ -96,9 +95,9 @@ func findMissing(typeUrl string, curr nameToResource, get getter) ([]string, err
 	return deletedResources, nil
 }
 
-func (sotw *sotw) ack(resp *discoverypb.DiscoveryResponse, resourceNames []string) *discoverypb.DiscoveryRequest {
+func (sotw *sotw) ack(node *corepb.Node, resp *discoverypb.DiscoveryResponse, resourceNames []string) *discoverypb.DiscoveryRequest {
 	return &discoverypb.DiscoveryRequest{
-		Node:          sotw.node,
+		Node:          node,
 		VersionInfo:   resp.GetVersionInfo(),
 		ResponseNonce: resp.GetNonce(),
 		TypeUrl:       resp.GetTypeUrl(),
@@ -106,9 +105,9 @@ func (sotw *sotw) ack(resp *discoverypb.DiscoveryResponse, resourceNames []strin
 	}
 }
 
-func (sotw *sotw) nack(resp *discoverypb.DiscoveryResponse, detail error) *discoverypb.DiscoveryRequest {
+func (sotw *sotw) nack(node *corepb.Node, resp *discoverypb.DiscoveryResponse, detail error) *discoverypb.DiscoveryRequest {
 	return &discoverypb.DiscoveryRequest{
-		Node:          sotw.node,
+		Node:          node,
 		ResponseNonce: resp.GetNonce(),
 		TypeUrl:       resp.GetTypeUrl(),
 		ErrorDetail: &statuspb.Status{

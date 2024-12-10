@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package client
+package xdsclient
 
 import (
 	"context"
@@ -35,6 +35,8 @@ import (
 	"github.com/cilium/cilium/pkg/envoy"
 	"github.com/cilium/cilium/pkg/envoy/xds"
 )
+
+const useSOTW = true
 
 var sotw2str = map[bool]string{true: "sotw", false: "delta"}
 
@@ -191,10 +193,9 @@ func TestHandleResponse_StoresInCache(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := *Defaults
-			opts.UseSOTW = true
-			c := NewClient(slog.Default(), testNode(), &opts).(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse])
-
+			opts := Defaults
+			c := NewClient(slog.Default(), useSOTW, &opts).(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse])
+			c.node = testNode()
 			resp := new(discoverypb.DiscoveryResponse)
 			appendResource := func(src proto.Message) {
 				res, err := anypb.New(src)
@@ -318,10 +319,9 @@ func TestUpsertAndDeleteMissing_Listeners(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := *Defaults
-			opts.UseSOTW = true
-			c := NewClient(slog.Default(), testNode(), &opts).(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse])
-
+			opts := Defaults
+			c := NewClient(slog.Default(), useSOTW, &opts).(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse])
+			c.node = testNode()
 			handleListenerResponse := func(listeners []*listenerpb.Listener) {
 				resp := new(discoverypb.DiscoveryResponse)
 				for _, l := range listeners {
@@ -430,10 +430,9 @@ func TestUpsertAndDeleteMissing_Endpoints(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := *Defaults
-			opts.UseSOTW = true
-			c := NewClient(slog.Default(), testNode(), &opts).(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse])
-
+			opts := Defaults
+			c := NewClient(slog.Default(), useSOTW, &opts).(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse])
+			c.node = testNode()
 			handleResponse := func(typeUrl string, clusters []*clusterpb.Cluster, endpoints []*endpointpb.ClusterLoadAssignment) {
 				if clusters == nil && endpoints == nil {
 					return
@@ -505,10 +504,9 @@ func TestHandleResponse_RejectsMismatchedTypes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := *Defaults
-			opts.UseSOTW = true
-			c := NewClient(slog.Default(), testNode(), &opts).(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse])
-
+			opts := Defaults
+			c := NewClient(slog.Default(), useSOTW, &opts).(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse])
+			c.node = testNode()
 			resp := &discoverypb.DiscoveryResponse{
 				Resources: []*anypb.Any{tc.res},
 				TypeUrl:   envoy.ListenerTypeURL,
@@ -577,12 +575,15 @@ func TestRunReturnsNonRetriableErrors(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					defer goleak.VerifyNone(t)
 
-					opts := *Defaults
-					opts.UseSOTW = sotw
-					opts.BootstrapResources = nil
+					opts := Defaults
 					opts.RetryBackoff.Min = time.Microsecond
 					opts.RetryBackoff.Max = time.Microsecond
-					c := NewClient(slog.Default(), testNode(), &opts)
+					c := NewClient(slog.Default(), sotw, &opts)
+					if sotw {
+						c.(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse]).node = testNode()
+					} else {
+						c.(*XDSClient[*discoverypb.DeltaDiscoveryRequest, *discoverypb.DeltaDiscoveryResponse]).node = testNode()
+					}
 					ctx, cancel := context.WithCancel(context.TODO())
 
 					f := newFakeClient()
@@ -687,18 +688,20 @@ func TestObserve(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					defer goleak.VerifyNone(t)
 
-					opts := *Defaults
-					opts.BootstrapResources = []string{}
-					opts.UseSOTW = sotw
-					c := NewClient(slog.Default(), testNode(), &opts)
+					opts := Defaults
+					c := NewClient(slog.Default(), sotw, &opts)
 					ctx, cancel := context.WithCancel(context.TODO())
 
 					typeUrl := envoy.ListenerTypeURL
 					var cache *xds.Cache
 					if sotw {
-						cache = c.(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse]).cache
+						sotwCl := c.(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse])
+						sotwCl.node = testNode()
+						cache = sotwCl.cache
 					} else {
-						cache = c.(*XDSClient[*discoverypb.DeltaDiscoveryRequest, *discoverypb.DeltaDiscoveryResponse]).cache
+						deltaCl := c.(*XDSClient[*discoverypb.DeltaDiscoveryRequest, *discoverypb.DeltaDiscoveryResponse])
+						deltaCl.node = testNode()
+						cache = deltaCl.cache
 					}
 					for _, rn := range tc.currResourceNames {
 						cache.Upsert(typeUrl, rn, &listenerpb.Listener{Name: rn})
@@ -758,38 +761,39 @@ func TestObserve(t *testing.T) {
 	}
 }
 
-type fakeClientConn struct {
+type FakeClientConn struct {
 	OnInvoke    func(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error
 	OnNewStream func(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error)
 }
 
-func (f *fakeClientConn) Invoke(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error {
+func (f *FakeClientConn) Invoke(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error {
 	return f.OnInvoke(ctx, method, args, reply, opts...)
 }
 
-func (f *fakeClientConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+func (f *FakeClientConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 	return f.OnNewStream(ctx, desc, method, opts...)
 }
 
-var _ grpc.ClientConnInterface = (*fakeClientConn)(nil)
+var _ grpc.ClientConnInterface = (*FakeClientConn)(nil)
 
 func TestClientConnectionRetry(t *testing.T) {
 	for _, retry := range []bool{true, false} {
 		t.Run(fmt.Sprintf("retry=%v", retry), func(t *testing.T) {
 			defer goleak.VerifyNone(t)
 
-			opts := *Defaults
+			opts := Defaults
 			opts.RetryBackoff.Min = time.Hour
 			opts.RetryBackoff.Max = time.Hour
 			opts.RetryConnection = retry
-			c := NewClient(slog.Default(), testNode(), &opts)
+			c := NewClient(slog.Default(), true, &opts)
+			c.(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse]).node = testNode()
 			ctx, cancel := context.WithCancel(context.TODO())
 			defer cancel()
 
 			wantErr := fmt.Errorf("test err")
 			newStreamCh := make(chan bool)
 			defer close(newStreamCh)
-			fakeConn := &fakeClientConn{
+			fakeConn := &FakeClientConn{
 				OnNewStream: func(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 					newStreamCh <- true
 					return nil, wantErr
@@ -800,7 +804,7 @@ func TestClientConnectionRetry(t *testing.T) {
 			var gotError error
 			go func() {
 				defer close(done)
-				gotError = c.Run(ctx, fakeConn)
+				gotError = c.Run(ctx, testNode(), fakeConn)
 			}()
 			<-newStreamCh
 			if retry {
@@ -842,10 +846,13 @@ func TestAckAndNack(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					defer goleak.VerifyNone(t)
 
-					opts := *Defaults
-					opts.UseSOTW = sotw
-					opts.BootstrapResources = nil
-					c := NewClient(slog.Default(), testNode(), &opts)
+					opts := Defaults
+					c := NewClient(slog.Default(), sotw, &opts)
+					if sotw {
+						c.(*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse]).node = testNode()
+					} else {
+						c.(*XDSClient[*discoverypb.DeltaDiscoveryRequest, *discoverypb.DeltaDiscoveryResponse]).node = testNode()
+					}
 					ctx, cancel := context.WithCancel(context.TODO())
 
 					typeUrl := envoy.ListenerTypeURL

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package client
+package xdsclient
 
 import (
 	"context"
@@ -15,7 +15,6 @@ import (
 )
 
 type delta struct {
-	node *corepb.Node
 }
 
 // delta implements flavour in delta protocol version.
@@ -28,9 +27,9 @@ func (delta *delta) transport(ctx context.Context, client discoverypb.Aggregated
 	return client.DeltaAggregatedResources(ctx, grpc.WaitForReady(true))
 }
 
-func (delta *delta) prepareObsReq(obsReq *observeRequest, _ getter) (*discoverypb.DeltaDiscoveryRequest, error) {
+func (delta *delta) prepareObsReq(obsReq *observeRequest, node *corepb.Node, _ getter) (*discoverypb.DeltaDiscoveryRequest, error) {
 	return &discoverypb.DeltaDiscoveryRequest{
-		Node:                   delta.node,
+		Node:                   node,
 		TypeUrl:                obsReq.typeUrl,
 		ResourceNamesSubscribe: obsReq.resourceNames,
 	}, nil
@@ -49,17 +48,17 @@ func (delta *delta) tx(resp *discoverypb.DeltaDiscoveryResponse, _ getter) (txs,
 	return txs{{typeUrl: resp.GetTypeUrl(), updated: ret, deleted: resp.GetRemovedResources()}}, nil
 }
 
-func (delta *delta) ack(resp *discoverypb.DeltaDiscoveryResponse, _ []string) *discoverypb.DeltaDiscoveryRequest {
+func (delta *delta) ack(node *corepb.Node, resp *discoverypb.DeltaDiscoveryResponse, _ []string) *discoverypb.DeltaDiscoveryRequest {
 	return &discoverypb.DeltaDiscoveryRequest{
-		Node:          delta.node,
+		Node:          node,
 		ResponseNonce: resp.GetNonce(),
 		TypeUrl:       resp.GetTypeUrl(),
 	}
 }
 
-func (delta *delta) nack(resp *discoverypb.DeltaDiscoveryResponse, detail error) *discoverypb.DeltaDiscoveryRequest {
+func (delta *delta) nack(node *corepb.Node, resp *discoverypb.DeltaDiscoveryResponse, detail error) *discoverypb.DeltaDiscoveryRequest {
 	return &discoverypb.DeltaDiscoveryRequest{
-		Node:          delta.node,
+		Node:          node,
 		ResponseNonce: resp.GetNonce(),
 		TypeUrl:       resp.GetTypeUrl(),
 		ErrorDetail: &statuspb.Status{

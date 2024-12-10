@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package client
+package xdsclient
 
 import (
 	"context"
@@ -22,19 +22,19 @@ import (
 	discoverypb "github.com/cilium/proxy/go/envoy/service/discovery/v3"
 )
 
-// requestCons is a constraint for request messages in xDS protocol.
-type requestCons interface {
+// requestConstraint is a constraint for request messages in xDS protocol.
+type requestConstraint interface {
 	*discoverypb.DiscoveryRequest | *discoverypb.DeltaDiscoveryRequest
 }
 
-// responseCons is a constraint for response messages in xDS protocol.
-type responseCons interface {
+// responseConstraint is a constraint for response messages in xDS protocol.
+type responseConstraint interface {
 	*discoverypb.DiscoveryResponse | *discoverypb.DeltaDiscoveryResponse
 	GetTypeUrl() string
 }
 
 // transport is a common generic interface of xDS gRPC client.
-type transport[req requestCons, resp responseCons] interface {
+type transport[req requestConstraint, resp responseConstraint] interface {
 	Send(req) error
 	Recv() (resp, error)
 }
@@ -54,29 +54,30 @@ type txs []tx
 // getter specifies function to retrieve all resources of given type url.
 type getter func(typeUrl string) (*xds.VersionedResources, error)
 
-// flavour specifies a common interface for implementations specific to sotw or delta protocol version.
-// It is primarily used by XDSClient.
-type flavour[ReqT requestCons, RespT responseCons] interface {
+// flavour specifies a common interface for implementations specific to sotw or
+// delta protocol version. It is primarily used by XDSClient.
+type flavour[ReqT requestConstraint, RespT responseConstraint] interface {
 	// transport constructs an instance of a transport based on the provided xDS ADS gRPC client.
 	transport(ctx context.Context, client discoverypb.AggregatedDiscoveryServiceClient) (transport[ReqT, RespT], error)
 
 	// prepareObsReq creates a request based on parameters used in Observe calls.
 	// get may be used to obtain the current contents of clients cache.
-	prepareObsReq(obsReq *observeRequest, get getter) (request ReqT, err error)
+	prepareObsReq(obsReq *observeRequest, node *corepb.Node, get getter) (request ReqT, err error)
 
 	// tx prepares a list of transactions based on a given response.
 	// get may be used to obtain the current contents of clients cache.
 	tx(resp RespT, get getter) (transactions txs, err error)
 
 	// ack constructs request serving as ACKnowledgment of the given response.
-	ack(resp RespT, resourceNames []string) (request ReqT)
+	ack(node *corepb.Node, resp RespT, resourceNames []string) (request ReqT)
 
-	// nack constructs request serving to inform the xDS server that their last response was Not ACKnowledged.
-	nack(resp RespT, detail error) (request ReqT)
+	// nack constructs request serving to inform the xDS server that their last
+	// response was Not ACKnowledged.
+	nack(node *corepb.Node, resp RespT, detail error) (request ReqT)
 }
 
-// BaseLayer is the public interface of xDS client.
-type BaseLayer interface {
+// Client is the public interface of xDS client.
+type Client interface {
 	// Observe adds resources of given type url and names to the attention set
 	// of the client.
 	Observe(ctx context.Context, typeUrl string, resourceNames []string) error
@@ -85,17 +86,16 @@ type BaseLayer interface {
 	// time a resource with given type url changes. Function returns a callback
 	// to deregister the watcher.
 	AddResourceWatcher(typeUrl string, cb WatcherCallback) func()
+
+	// Run initialize the node and start an AggregatedDiscoverService stream.
+	// Requests and responses are processed until provided Context ctx is
+	// done or non-retriable error occurs.
+	Run(ctx context.Context, node *corepb.Node, conn grpc.ClientConnInterface) error
 }
 
-// BaseLayerWithRun extends BaseLayer interface with Run method.
-type BaseLayerWithRun interface {
-	BaseLayer
-	Run(ctx context.Context, conn grpc.ClientConnInterface) error
-}
-
-// XDSClient implements BaseLayerWithRun.
-var _ BaseLayerWithRun = (*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse])(nil)
-var _ BaseLayerWithRun = (*XDSClient[*discoverypb.DeltaDiscoveryRequest, *discoverypb.DeltaDiscoveryResponse])(nil)
+// XDSClient implements Client.
+var _ Client = (*XDSClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse])(nil)
+var _ Client = (*XDSClient[*discoverypb.DeltaDiscoveryRequest, *discoverypb.DeltaDiscoveryResponse])(nil)
 
 // observeRequest is an internal representation of call to Observe method.
 type observeRequest struct {
@@ -106,14 +106,15 @@ type observeRequest struct {
 
 // XDSClient is a common part of xDS gRPC client implementation using flavour to
 // implement xDS protocol version specific behaviors.
-type XDSClient[ReqT requestCons, RespT responseCons] struct {
+type XDSClient[ReqT requestConstraint, RespT responseConstraint] struct {
 	log  *slog.Logger
-	opts Options
+	opts ConnectionOptions
 
 	observeQueue  chan *observeRequest
 	responseQueue chan RespT
 
-	xds flavour[ReqT, RespT]
+	node *corepb.Node
+	xds  flavour[ReqT, RespT]
 
 	// cache stores versioned resources.
 	cache *xds.Cache
@@ -123,22 +124,14 @@ type XDSClient[ReqT requestCons, RespT responseCons] struct {
 
 // NewClient creates a new instance of XDSClient using sotw or delta protocol
 // flavour based on options opts.
-func NewClient(log *slog.Logger, node *corepb.Node, opts *Options) BaseLayerWithRun {
-	// n is used to identify a client to xDS server.
-	// It is part of every Request sent on a stream.
-	n := proto.Clone(node).(*corepb.Node)
-	if opts.UseSOTW {
-		c := newClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse](log, opts)
-		c.xds = &sotw{n}
-		return c
-	} else {
-		c := newClient[*discoverypb.DeltaDiscoveryRequest, *discoverypb.DeltaDiscoveryResponse](log, opts)
-		c.xds = &delta{n}
-		return c
+func NewClient(log *slog.Logger, useSOTW bool, opts *ConnectionOptions) Client {
+	if useSOTW {
+		return newClient[*discoverypb.DiscoveryRequest, *discoverypb.DiscoveryResponse](log, opts, &sotw{})
 	}
+	return newClient[*discoverypb.DeltaDiscoveryRequest, *discoverypb.DeltaDiscoveryResponse](log, opts, &delta{})
 }
 
-func newClient[ReqT requestCons, RespT responseCons](log *slog.Logger, opts *Options) *XDSClient[ReqT, RespT] {
+func newClient[ReqT requestConstraint, RespT responseConstraint](log *slog.Logger, opts *ConnectionOptions, flavour flavour[ReqT, RespT]) *XDSClient[ReqT, RespT] {
 	cache := xds.NewCache()
 
 	return &XDSClient[ReqT, RespT]{
@@ -146,14 +139,20 @@ func newClient[ReqT requestCons, RespT responseCons](log *slog.Logger, opts *Opt
 		opts:          *opts,
 		observeQueue:  make(chan *observeRequest, 1),
 		responseQueue: make(chan RespT, 1),
+		xds:           flavour,
 		cache:         cache,
 		watchers:      newCallbackManager(log.With(logfields.Hint, "watchers"), cache),
 	}
 }
 
-// Run will start an AggregatedDiscoverService stream and process requests
-// and responses until provided Context ctx is done or non-retriable error occurs.
-func (c *XDSClient[ReqT, RespT]) Run(ctx context.Context, conn grpc.ClientConnInterface) error {
+// Run initialize the node and start an AggregatedDiscoverService stream. Then
+// requests and responses are processed until provided Context ctx is done or
+// non-retriable error occurs.
+func (c *XDSClient[ReqT, RespT]) Run(ctx context.Context, node *corepb.Node, conn grpc.ClientConnInterface) error {
+	// node is used to identify a client to xDS server. Nodes's value is retried
+	// from LocalNodeStore and it needs to be late initialized.
+	c.node = proto.Clone(node).(*corepb.Node)
+	c.log.Info("starting xDS client with node", "Id", c.node.Id, "Cluster", c.node.Cluster, "Agent", c.node.UserAgentName)
 	backoff := backoff.Exponential{
 		Min:        c.opts.RetryBackoff.Min,
 		Max:        c.opts.RetryBackoff.Max,
@@ -308,11 +307,13 @@ func (c *XDSClient[ReqT, RespT]) loop(ctx context.Context, errCh chan error, tra
 		Jitter:     true,
 		Name:       "xds-client-loop",
 	}
+	log.Info("start processing loop")
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case obsReq, ok := <-c.observeQueue:
+			log.Debug("got observe msg from the queue", logfields.Request, obsReq)
 			if !ok {
 				return
 			}
@@ -341,7 +342,7 @@ func (c *XDSClient[ReqT, RespT]) loop(ctx context.Context, errCh chan error, tra
 					return
 				case errCh <- err:
 				}
-				req := c.xds.nack(resp, err)
+				req := c.xds.nack(c.node, resp, err)
 				err = trans.Send(req)
 				if err != nil {
 					log.Error("Failed to send NACK", logfields.Error, err)
@@ -354,7 +355,7 @@ func (c *XDSClient[ReqT, RespT]) loop(ctx context.Context, errCh chan error, tra
 
 // handleObserve creates a flavour-specific request based on observeRequest and sends it on given transport trans.
 func (c *XDSClient[ReqT, RespT]) handleObserve(trans transport[ReqT, RespT], obsReq *observeRequest) error {
-	req, err := c.xds.prepareObsReq(obsReq, c.getAllResources)
+	req, err := c.xds.prepareObsReq(obsReq, c.node, c.getAllResources)
 	if err != nil {
 		return fmt.Errorf("prepare observe request: %w", err)
 	}
@@ -378,7 +379,7 @@ func (c *XDSClient[ReqT, RespT]) handleResponse(trans transport[ReqT, RespT], re
 		ver, updated, _ := c.cache.TX(transaction.typeUrl, transaction.updated, transaction.deleted)
 		c.log.Debug("cache TX: end", transaction.typeUrl, transaction.typeUrl, logfields.XDSCachedVersion, ver, "updated", updated)
 	}
-	req := c.xds.ack(resp, nil)
+	req := c.xds.ack(c.node, resp, nil)
 
 	c.log.Debug("Send", "req", req)
 	err = trans.Send(req)
