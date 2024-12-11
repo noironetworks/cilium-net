@@ -89,6 +89,7 @@ jobs:
       fail-fast: false
       matrix:
         identityManagementMode: ["both", "operator"]
+        ciliumEndpointSliceEnabled: ["true", "false"]
     steps:
       - name: Collect Workflow Telemetry
         uses: catchpoint/workflow-telemetry-action@94c3c3d9567a0205de6da68a76c428ce4e769af1 # v2.0.0
@@ -129,7 +130,8 @@ jobs:
 
           # Cilium configured with operator managing identities
           CILIUM_INSTALL_DEFAULTS="${{ steps.default_vars.outputs.cilium_install_defaults }} \
-            --helm-set=identityManagementMode=${{ matrix.identityManagementMode }}"
+            --helm-set=identityManagementMode=${{ matrix.identityManagementMode }} \
+            --helm-set=ciliumEndpointSlice.enabled=${{ matrix.ciliumEndpointSliceEnabled }}"
 
           CONNECTIVITY_TEST_DEFAULTS="--test-concurrency=5 \
             --flow-validation=disabled --hubble=false --collect-sysdump-on-failure \
