@@ -170,7 +170,7 @@ func frontendCommand(w *Writer) script.Cmd {
 					if err != nil {
 						return nil, err
 					} else {
-						s.Logf("Deleted frontend %q\n", addr.StringWithProtocol)
+						s.Logf("Deleted frontend %q\n", addr.StringWithProtocol())
 					}
 				}
 			} else {
