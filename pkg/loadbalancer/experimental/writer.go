@@ -164,6 +164,15 @@ func (w *Writer) UpsertFrontend(txn WriteTxn, params FrontendParams) (old *Front
 	return old, err
 }
 
+func (w *Writer) DeleteFrontend(txn WriteTxn, addr loadbalancer.L3n4Addr) (old *Frontend, err error) {
+	fe, _, found := w.fes.Get(txn, FrontendByAddress(addr))
+	if found {
+		_, _, err = w.fes.Delete(txn, fe)
+		return fe, err
+	}
+	return nil, nil
+}
+
 // UpsertServiceAndFrontends upserts the service and updates the set of associated frontends.
 // Any frontends that do not exist in the new set are deleted.
 func (w *Writer) UpsertServiceAndFrontends(txn WriteTxn, svc *Service, fes ...FrontendParams) error {
