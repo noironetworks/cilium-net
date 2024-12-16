@@ -70,14 +70,13 @@ func newConfig(in newConfigIn) (Config, error) {
 		// Ensure the mode given in the enabler is valid.
 		switch e.mode {
 		case AccelerationModeBestEffort, AccelerationModeNative, AccelerationModeGeneric, AccelerationModeDisabled:
-			break
 		default:
 			return cfg, fmt.Errorf("unknown xdp mode: %s", e.mode)
 		}
 
-		if e.mode != cfg.mode {
-			allValidators = append(allValidators, e.validators...)
+		allValidators = append(allValidators, e.validators...)
 
+		if e.mode != cfg.mode {
 			// If an enabler requests a mode that we've already set,
 			// then there's nothing to do.
 			if cfg.mode == e.mode {
@@ -192,6 +191,23 @@ func WithEnforceXDPDisabled(reason string) enablerOpt {
 			func(m AccelerationMode, _ Mode) error {
 				if m != AccelerationModeDisabled {
 					return fmt.Errorf("XDP config failed validation: XDP must be disabled because %s", reason)
+				}
+
+				return nil
+			},
+		)
+	}
+}
+
+// WithEnforceXDPNative registers a validation function that
+// returns an error if XDP is not enabled in native mode.
+func WithEnforceXDPNative(reason string) enablerOpt {
+	return func(te *enabler) {
+		te.validators = append(
+			te.validators,
+			func(m AccelerationMode, _ Mode) error {
+				if m != AccelerationModeNative {
+					return fmt.Errorf("XDP config failed validation: XDP must be native because %s", reason)
 				}
 
 				return nil
