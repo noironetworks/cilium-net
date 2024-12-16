@@ -4,6 +4,7 @@
 package experimental
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,14 +14,21 @@ import (
 
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/script"
+	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/reconciler"
+	"gopkg.in/yaml.v3"
 
+	"github.com/cilium/cilium/api/structs"
 	"github.com/cilium/cilium/api/v1/models"
+	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/loadbalancer"
 	"github.com/cilium/cilium/pkg/source"
 )
 
-func scriptCommands(cfg Config, w *Writer, m LBMaps, r reconciler.Reconciler[*Frontend]) hive.ScriptCmdsOut {
+func scriptCommands(
+	cfg Config, db *statedb.DB, w *Writer,
+	m LBMaps, r reconciler.Reconciler[*Frontend],
+) hive.ScriptCmdsOut {
 	if !cfg.EnableExperimentalLB {
 		return hive.ScriptCmdsOut{}
 	}
@@ -41,6 +49,7 @@ func scriptCommands(cfg Config, w *Writer, m LBMaps, r reconciler.Reconciler[*Fr
 		"lb/service":  serviceCommand(w),
 		"lb/frontend": frontendCommand(w),
 		"lb/backend":  backendCommand(w),
+		"lb/sync":     syncCommand(db, w),
 	})
 }
 
@@ -301,6 +310,49 @@ func backendCommand(w *Writer) script.Cmd {
 	)
 }
 
+func syncCommand(db *statedb.DB, w *Writer) script.Cmd {
+	return script.Command(
+		script.CmdUsage{
+			Summary: "Synchronize load-balancing state",
+			Args:    "file",
+			Detail: []string{
+				"Reads the state from given file and synchronizes 'Local'",
+				"services and backends.",
+				"",
+				"The format of the file is specified in 'api/structs/loadbalancer.go'",
+			},
+		},
+		func(s *script.State, args ...string) (script.WaitFunc, error) {
+			if len(args) != 1 {
+				return nil, script.ErrUsage
+			}
+			filename := args[0]
+			b, err := os.ReadFile(s.Path(filename))
+			if err != nil {
+				return nil, err
+			}
+			var state structs.LoadBalancerState
+			switch {
+			case strings.HasSuffix(filename, ".yaml"), strings.HasSuffix(filename, ".yml"):
+				err = yaml.Unmarshal(b, &state)
+			case strings.HasSuffix(filename, ".json"):
+				err = json.Unmarshal(b, &state)
+			default:
+				return nil, fmt.Errorf("could not deduce file format from %q, expected .json or .yaml suffix", filename)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("loading from %q failed: %w", filename, err)
+			}
+
+			ls, err := newLocalSynchronizer(db, w)
+			if err != nil {
+				return nil, err
+			}
+			return nil, ls.synchronize(&state)
+		},
+	)
+}
+
 func lbmapDumpCommand(m LBMaps) script.Cmd {
 	if f, ok := m.(*FaultyLBMaps); ok {
 		m = f.impl
@@ -437,4 +489,204 @@ func reorderArgs(args []string) {
 			}
 		},
 	)
+}
+
+// localSynchronizer syncs Source=LocalAPI state from a file containing a
+// [structs.LoadBalancerState].
+type localSynchronizer struct {
+	txn WriteTxn
+	w   *Writer
+}
+
+func newLocalSynchronizer(db *statedb.DB, w *Writer) (*localSynchronizer, error) {
+	s := &localSynchronizer{
+		txn: w.WriteTxn(),
+		w:   w,
+	}
+
+	// Delete all existing source=LocalAPI services/frontends/backends.
+	err := w.DeleteServicesBySource(s.txn, source.LocalAPI)
+	if err != nil {
+		s.txn.Abort()
+		return nil, err
+	}
+	err = w.DeleteBackendsBySource(s.txn, source.LocalAPI)
+	if err != nil {
+		s.txn.Abort()
+		return nil, err
+	}
+
+	return s, nil
+}
+
+func (s *localSynchronizer) synchronize(state *structs.LoadBalancerState) error {
+	defer func() {
+		s.txn.Abort()
+		*s = localSynchronizer{}
+	}()
+
+	for i := range state.Services {
+		if err := s.upsertService(&state.Services[i]); err != nil {
+			return err
+		}
+	}
+	s.txn.Commit()
+	return nil
+}
+
+func (s *localSynchronizer) upsertService(svc *structs.Service) error {
+	natPolicy, err := parseNatPolicy(svc.NatPolicy)
+	if err != nil {
+		return fmt.Errorf("invalid NatPolicy: %w", err)
+	}
+	intTrafficPolicy, err := parseTrafficPolicy(svc.IntTrafficPolicy)
+	if err != nil {
+		return fmt.Errorf("invalid IntTrafficPolicy: %w", err)
+	}
+	extTrafficPolicy, err := parseTrafficPolicy(svc.ExtTrafficPolicy)
+	if err != nil {
+		return fmt.Errorf("invalid ExtTrafficPolicy: %w", err)
+	}
+
+	newSVC := &Service{
+		Name: loadbalancer.ServiceName{
+			Namespace: svc.Namespace,
+			Name:      svc.Name,
+		},
+		Source:              source.LocalAPI,
+		Labels:              nil,
+		Annotations:         nil,
+		NatPolicy:           natPolicy,
+		ExtTrafficPolicy:    intTrafficPolicy,
+		IntTrafficPolicy:    extTrafficPolicy,
+		HealthCheckNodePort: svc.HealthCheckNodePort,
+	}
+
+	if _, err = s.w.UpsertService(s.txn, newSVC); err != nil {
+		return err
+	}
+
+	for i := range svc.Frontends {
+		if err := s.upsertFrontend(newSVC, &svc.Frontends[i]); err != nil {
+			return err
+		}
+	}
+
+	if err := s.upsertBackends(newSVC, svc.Backends); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *localSynchronizer) upsertFrontend(svc *Service, fe *structs.Frontend) error {
+	addr, err := parseAddress(fe.Address)
+	if err != nil {
+		return err
+	}
+	typ, err := parseEnum(fe.Type, loadbalancer.SVCTypes)
+	if err != nil {
+		return fmt.Errorf("invalid Type: %w", err)
+	}
+	newFE := FrontendParams{
+		Address:     addr,
+		Type:        typ,
+		ServiceName: svc.Name,
+		PortName:    loadbalancer.FEPortName(fe.PortName),
+		ServicePort: addr.Port,
+	}
+	_, err = s.w.UpsertFrontend(s.txn, newFE)
+	return err
+}
+
+func (s *localSynchronizer) upsertBackends(svc *Service, bes []structs.Backend) error {
+	params := make([]BackendParams, len(bes))
+	for i := range bes {
+		be := &bes[i]
+		addr, err := parseAddress(be.Address)
+		if err != nil {
+			return err
+		}
+		state, err := parseBackendState(be.State)
+		if err != nil {
+			return err
+		}
+		params[i] = BackendParams{
+			L3n4Addr: addr,
+			PortName: "",
+			Weight:   be.Weight,
+			ZoneID:   0,
+			State:    state,
+		}
+	}
+	return s.w.UpsertBackends(s.txn, svc.Name, source.LocalAPI, params...)
+}
+
+func parseNatPolicy(s string) (loadbalancer.SVCNatPolicy, error) {
+	return parseEnum(s, loadbalancer.SVCNatPolicies)
+}
+
+func parseTrafficPolicy(s string) (loadbalancer.SVCTrafficPolicy, error) {
+	if s == "" {
+		return loadbalancer.SVCTrafficPolicyCluster, nil
+	}
+	return parseEnum(s, loadbalancer.SVCTrafficPolicies)
+}
+
+func parseBackendState(s string) (loadbalancer.BackendState, error) {
+	switch strings.ToLower(s) {
+	case "", "active":
+		return loadbalancer.BackendStateActive, nil
+	case "maintenance":
+		return loadbalancer.BackendStateMaintenance, nil
+	case "terminating":
+		return loadbalancer.BackendStateTerminating, nil
+	case "quarantined":
+		return loadbalancer.BackendStateQuarantined, nil
+	default:
+		return loadbalancer.BackendStateInvalid,
+			fmt.Errorf("%q not valid, expected one of: active, maintenance, terminating or quarantined",
+				s,
+			)
+	}
+}
+
+func parseEnum[T ~string](s string, values []T) (T, error) {
+	s = strings.ToLower(s)
+	for _, v := range values {
+		if s == strings.ToLower(string(v)) {
+			return v, nil
+		}
+	}
+	return T(""), fmt.Errorf("%q not valid (options: %v)", s, values)
+}
+
+func parseAddress(addr structs.Address) (loadbalancer.L3n4Addr, error) {
+	addrCluster, err := cmtypes.ParseAddrCluster(addr.IP)
+	if err != nil {
+		return loadbalancer.L3n4Addr{}, err
+	}
+
+	proto := strings.ToUpper(addr.Protocol)
+	switch proto {
+	}
+
+	var scope uint8
+	switch strings.ToLower(addr.Scope) {
+	case "", "e", "external":
+		scope = loadbalancer.ScopeExternal
+	case "i", "internal":
+		scope = loadbalancer.ScopeInternal
+	default:
+		return loadbalancer.L3n4Addr{},
+			fmt.Errorf("invalid scope %q, expected 'internal' or 'external'", addr.Scope)
+	}
+	return loadbalancer.L3n4Addr{
+		AddrCluster: addrCluster,
+		L4Addr: loadbalancer.L4Addr{
+			Protocol: proto,
+			Port:     addr.Port,
+		},
+		Scope: scope,
+	}, nil
 }
