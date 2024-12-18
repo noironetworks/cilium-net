@@ -198,7 +198,9 @@ func newTestAgent(ctx context.Context, wgClient wireguardClient) (*Agent, *ipcac
 		nodeNameByNodeIP: map[string]string{},
 		nodeNameByPubKey: map[wgtypes.Key]string{},
 	}
-	ipCache.AddListener(wgAgent)
+	if option.Config.WireguardTrackAllIPsFallback || !option.Config.TunnelingEnabled() {
+		ipCache.AddListener(wgAgent)
+	}
 	return wgAgent, ipCache
 }
 
@@ -206,6 +208,7 @@ func newTestAgent(ctx context.Context, wgClient wireguardClient) (*Agent, *ipcac
 type config struct {
 	Name        string
 	RoutingMode string
+	Fallback    bool
 	// slice of allowedIPs expected to be present everytime calling assertAllowedIPs.
 	Expectations [][]*net.IPNet
 }
@@ -228,10 +231,17 @@ func TestAgent_PeerConfig(t *testing.T) {
 			{k8s1NodeIPv4Pfx, k8s1NodeIPv6Pfx, pod1IPv4, pod1IPv6, pod2IPv4, pod2IPv6},
 			{k8s1NodeIPv4Pfx, k8s1NodeIPv6Pfx, pod2IPv4, pod2IPv6},
 			{k8s2NodeIPv4Pfx, k8s2NodeIPv6Pfx, pod3IPv4, pod3IPv6}}
+
+		tunnelRoutingAllowedIPs = [][]*net.IPNet{
+			{k8s1NodeIPv4Pfx, k8s1NodeIPv6Pfx},
+			{k8s1NodeIPv4Pfx, k8s1NodeIPv6Pfx},
+			{k8s2NodeIPv4Pfx, k8s2NodeIPv6Pfx}}
 	)
 
 	for _, c := range []config{
-		{"NativeRouting", option.RoutingModeNative, nativeRoutingAllowedIPs},
+		{"NativeRouting", option.RoutingModeNative, false, nativeRoutingAllowedIPs},
+		{"TunnelRouting With Fallback", option.RoutingModeTunnel, true, nativeRoutingAllowedIPs},
+		{"TunnelRouting Without Fallback", option.RoutingModeTunnel, false, tunnelRoutingAllowedIPs},
 	} {
 		t.Run(c.Name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -240,6 +250,10 @@ func TestAgent_PeerConfig(t *testing.T) {
 			prevRoutingMode := option.Config.RoutingMode
 			defer func() { option.Config.RoutingMode = prevRoutingMode }()
 			option.Config.RoutingMode = c.RoutingMode
+
+			prevFallback := option.Config.WireguardTrackAllIPsFallback
+			defer func() { option.Config.WireguardTrackAllIPsFallback = prevFallback }()
+			option.Config.WireguardTrackAllIPsFallback = c.Fallback
 
 			wgAgent, ipCache := newTestAgent(ctx, newFakeWgClient())
 			defer ipCache.Shutdown()
@@ -382,10 +396,26 @@ func TestAgent_AllowedIPsRestoration(t *testing.T) {
 			{pod4IPv4, pod4IPv6, k8s2NodeIPv4_2_Pfx, k8s2NodeIPv6_2_Pfx},
 			{pod2IPv4, pod1IPv6, pod2IPv6, k8s1NodeIPv4Pfx, k8s1NodeIPv6Pfx},
 			{pod4IPv4, pod4IPv6, k8s2NodeIPv4Pfx, k8s2NodeIPv6Pfx}}
+
+		tunnelRoutingAllowedIPs = [][]*net.IPNet{
+			{pod1IPv4, pod3IPv4, pod4IPv4, pod2IPv6, pod3IPv6, pod4IPv6, k8s1NodeIPv4Pfx, k8s1NodeIPv6Pfx},
+			{pod1IPv4, pod3IPv4, pod4IPv4, pod2IPv6, pod3IPv6, pod4IPv6, k8s1NodeIPv4Pfx, k8s1NodeIPv6Pfx},
+			{pod1IPv4, pod3IPv4, pod4IPv4, pod2IPv6, pod3IPv6, pod4IPv6, k8s1NodeIPv4Pfx, k8s1NodeIPv6Pfx},
+			{k8s2NodeIPv4Pfx, k8s2NodeIPv6Pfx},
+			{k8s1NodeIPv4Pfx, k8s1NodeIPv6Pfx},
+			{k8s2NodeIPv4Pfx, k8s2NodeIPv6Pfx},
+			{k8s1NodeIPv4Pfx, k8s1NodeIPv6Pfx},
+			{k8s2NodeIPv4Pfx, k8s2NodeIPv6Pfx},
+			{k8s1NodeIPv4Pfx, k8s1NodeIPv6Pfx},
+			{k8s2NodeIPv4_2_Pfx, k8s2NodeIPv6_2_Pfx},
+			{k8s1NodeIPv4Pfx, k8s1NodeIPv6Pfx},
+			{k8s2NodeIPv4Pfx, k8s2NodeIPv6Pfx}}
 	)
 
 	for _, c := range []config{
-		{"NativeRouting", option.RoutingModeNative, nativeRoutingAllowedIPs},
+		{"NativeRouting", option.RoutingModeNative, false, nativeRoutingAllowedIPs},
+		{"TunnelRouting With Fallback", option.RoutingModeTunnel, true, nativeRoutingAllowedIPs},
+		{"TunnelRouting Without Fallback", option.RoutingModeTunnel, false, tunnelRoutingAllowedIPs},
 	} {
 		t.Run(c.Name, func(t *testing.T) {
 			ctx := context.Background()
@@ -393,6 +423,10 @@ func TestAgent_AllowedIPsRestoration(t *testing.T) {
 			prevRoutingMode := option.Config.RoutingMode
 			defer func() { option.Config.RoutingMode = prevRoutingMode }()
 			option.Config.RoutingMode = c.RoutingMode
+
+			prevFallback := option.Config.WireguardTrackAllIPsFallback
+			defer func() { option.Config.WireguardTrackAllIPsFallback = prevFallback }()
+			option.Config.WireguardTrackAllIPsFallback = c.Fallback
 
 			key1, err := wgtypes.ParseKey(k8s1PubKey)
 			require.NoError(t, err, "Failed to parse WG key")
