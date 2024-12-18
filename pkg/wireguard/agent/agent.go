@@ -165,8 +165,12 @@ func (a *Agent) Init(ipcache *ipcache.IPCache) error {
 	defer func() {
 		// IPCache will call back into OnIPIdentityCacheChange which requires
 		// us to release a.mutex before we can add ourself as a listener.
+		//
+		// We then register to IPCache events:
+		// 1. when the fallback flag WireguardTrackAllIPsFallback is provided;
+		// 2. in native routing mode, as for tunneling we only need nodeIPs from UpdatePeer.
 		a.Unlock()
-		if addIPCacheListener {
+		if addIPCacheListener && (option.Config.WireguardTrackAllIPsFallback || !option.Config.TunnelingEnabled()) {
 			a.ipCache.AddListener(a)
 		}
 	}()
@@ -378,21 +382,26 @@ func (a *Agent) UpdatePeer(nodeName, pubKeyHex string, nodeIPv4, nodeIPv6 net.IP
 	}
 
 	peer := a.peerByNodeName[nodeName]
-	// (Re)initialize peer if this is the first time we are processing this node
-	// or if the peer's public key changed.
-	if peer == nil {
-		peer = &peerConfig{}
 
-		peer.queueAllowedIPsInsert(a.ipCache.LookupByHostRLocked(nodeIPv4, nodeIPv6)...)
-	} else if peer.pubKey != pubKey {
+	// Reinitialize peer if its public key changed.
+	if peer != nil && peer.pubKey != pubKey {
 		log.WithField(logfields.NodeName, nodeName).Debug("Pubkey has changed")
-		// pubKeys differ, so delete old peer and create a "new" one
 		if err := a.deletePeerByPubKey(peer.pubKey); err != nil {
 			return err
 		}
+		peer = nil
+	}
 
+	// Initialize peer if this is the first time we are processing this node.
+	if peer == nil {
 		peer = &peerConfig{}
-		peer.queueAllowedIPsInsert(a.ipCache.LookupByHostRLocked(nodeIPv4, nodeIPv6)...)
+
+		// In tunneling mode we only need nodeIPs, which are inserted later.
+		// Therefore, we sync IPs from IPCache only in native routing mode
+		// or when the fallback flag WireguardTrackAllIPsFallback is enabled.
+		if option.Config.WireguardTrackAllIPsFallback || !option.Config.TunnelingEnabled() {
+			peer.queueAllowedIPsInsert(a.ipCache.LookupByHostRLocked(nodeIPv4, nodeIPv6)...)
+		}
 	}
 
 	// Handle Node IP change
