@@ -13,6 +13,7 @@ func TestMaxHistory(t *testing.T) {
 	assert := assert.New(t)
 
 	p := Parameters{
+		Version:        "1.16.4",
 		HelmMaxHistory: 15,
 	}
 
