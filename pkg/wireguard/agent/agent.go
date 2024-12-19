@@ -317,22 +317,26 @@ func (a *Agent) RestoreFinished(cm *clustermesh.ClusterMesh) error {
 
 	for _, p := range dev.Peers {
 		if pc, ok := pubKeyToPeerConfig[p.PublicKey]; ok {
+			var hasObsolete bool
 			for _, ip := range p.AllowedIPs {
 				if !pc.hasAllowedIP(ip) {
+					hasObsolete = true
 					pc.queueAllowedIPsRemove(ip)
 				}
 			}
 
-			log.WithFields(logrus.Fields{
-				logfields.Endpoint: pc.endpoint,
-				logfields.PubKey:   pc.pubKey,
-			}).Info("Removing obsolete AllowedIPs from WireGuard peer")
-			if err := a.updatePeerByConfig(pc); err != nil {
-				log.WithError(err).WithFields(logrus.Fields{
+			if hasObsolete {
+				log.WithFields(logrus.Fields{
 					logfields.Endpoint: pc.endpoint,
 					logfields.PubKey:   pc.pubKey,
-				}).Error("Failed to remove stale AllowedIPs from WireGuard peer")
-				return err
+				}).Info("Removing obsolete AllowedIPs from WireGuard peer")
+				if err := a.updatePeerByConfig(pc); err != nil {
+					log.WithError(err).WithFields(logrus.Fields{
+						logfields.Endpoint: pc.endpoint,
+						logfields.PubKey:   pc.pubKey,
+					}).Error("Failed to remove stale AllowedIPs from WireGuard peer")
+					return err
+				}
 			}
 		} else {
 			log.WithField(logfields.PubKey, p.PublicKey).Info("Removing obsolete peer")
@@ -535,14 +539,20 @@ func (a *Agent) updatePeerByConfig(p *peerConfig) error {
 		Peers:        []wgtypes.PeerConfig{peer},
 	}
 
-	log.WithFields(logrus.Fields{
-		logfields.Endpoint: p.endpoint,
-		logfields.PubKey:   p.pubKey,
-		logfields.IPAddrs:  peer.AllowedIPs,
-	}).Debug("Updating peer config")
+	// ConfigureDevice is called to add new allowedIPs:
+	// 1. during the first call to UpdatePeer;
+	// 2. when there are changes to the node's public key or IPs;
+	// 3. on IPcache upsertions.
+	if len(addedIPs) > 0 {
+		log.WithFields(logrus.Fields{
+			logfields.Endpoint: p.endpoint,
+			logfields.PubKey:   p.pubKey,
+			logfields.IPAddrs:  peer.AllowedIPs,
+		}).Debug("Updating peer config")
 
-	if err := a.wgClient.ConfigureDevice(types.IfaceName, cfg); err != nil {
-		return fmt.Errorf("while adding IPs to peer: %w", err)
+		if err := a.wgClient.ConfigureDevice(types.IfaceName, cfg); err != nil {
+			return fmt.Errorf("while adding IPs to peer: %w", err)
+		}
 	}
 
 	// WireGuard's netlink API does not support direct removal of allowed IPs
@@ -568,8 +578,9 @@ func (a *Agent) updatePeerByConfig(p *peerConfig) error {
 		}
 
 		log.WithFields(logrus.Fields{
-			logfields.PubKey:  wgDummyPeerKey,
-			logfields.IPAddrs: removedIPs,
+			logfields.Endpoint: p.endpoint,
+			logfields.PubKey:   wgDummyPeerKey,
+			logfields.IPAddrs:  removedIPs,
 		}).Debug("Moving removed IPs to dummy peer")
 
 		if err := a.wgClient.ConfigureDevice(types.IfaceName, cfg); err != nil {
