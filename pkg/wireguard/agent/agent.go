@@ -31,6 +31,7 @@ import (
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/pkg/annotation"
 	"github.com/cilium/cilium/pkg/backoff"
+	"github.com/cilium/cilium/pkg/cidr"
 	"github.com/cilium/cilium/pkg/clustermesh"
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/container/bitlpm"
@@ -355,7 +356,7 @@ func (a *Agent) RestoreFinished(cm *clustermesh.ClusterMesh) error {
 	return nil
 }
 
-func (a *Agent) UpdatePeer(nodeName, pubKeyHex string, nodeIPv4, nodeIPv6 net.IP) error {
+func (a *Agent) UpdatePeer(nodeName, pubKeyHex string, nodeIPv4, nodeIPv6 net.IP, podAllocCIDRs []*cidr.CIDR) error {
 	// To avoid running into a deadlock, we need to lock the IPCache before
 	// calling a.Lock(), because IPCache might try to call into
 	// OnIPIdentityCacheChange concurrently
@@ -403,6 +404,16 @@ func (a *Agent) UpdatePeer(nodeName, pubKeyHex string, nodeIPv4, nodeIPv6 net.IP
 			for _, ip := range a.ipCache.LookupByHostRLocked(nodeIPv4, nodeIPv6) {
 				peer.queueAllowedIPInsert(ip)
 			}
+		}
+	}
+
+	// We always sync CIDRs when available and we're not in tunneling mode or when
+	// the fallback flag WireguardTrackAllIPsFallback is enabled.
+	// This ensures that in case they're somehow removed through IPCache but the node
+	// still uses them (passed to this method), then the peer config is still aligned.
+	if option.Config.WireguardTrackAllIPsFallback || !option.Config.TunnelingEnabled() {
+		for _, c := range podAllocCIDRs {
+			peer.queueAllowedIPInsert(*c.IPNet)
 		}
 	}
 
