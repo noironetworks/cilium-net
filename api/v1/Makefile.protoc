@@ -18,10 +18,17 @@ HUBBLE_GO_TARGETS := $(HUBBLE_PROTO_SOURCES:.proto=.pb.go) $(HUBBLE_PROTO_SOURCE
 
 HUBBLE_PROTO_PATH := .
 
-HUBBLE_PROTOC_PLUGINS := --plugin=$(GOPATH)/bin/protoc-gen-doc
-HUBBLE_PROTOC_PLUGINS += --plugin=$(GOPATH)/bin/protoc-gen-go-grpc
-HUBBLE_PROTOC_PLUGINS += --plugin=$(GOPATH)/bin/protoc-gen-go-json
-HUBBLE_PROTOC_PLUGINS += --plugin=$(GOPATH)/bin/protoc-gen-go
+PROTOC_PLUGINS := --plugin=$(GOPATH)/bin/protoc-gen-doc
+PROTOC_PLUGINS += --plugin=$(GOPATH)/bin/protoc-gen-go-grpc
+PROTOC_PLUGINS += --plugin=$(GOPATH)/bin/protoc-gen-go-json
+PROTOC_PLUGINS += --plugin=$(GOPATH)/bin/protoc-gen-go
+
+STANDALONE_DNS_PROXY_PROTO_SOURCES := \
+	./standalone-dns-proxy/standalone-dns-proxy.proto
+
+STANDALONE_DNS_PROXY_GO_TARGETS := $(STANDALONE_DNS_PROXY_PROTO_SOURCES:.proto=.pb.go) $(STANDALONE_DNS_PROXY_PROTO_SOURCES:.proto=.pb.json.go)
+
+STANDALONE_DNS_PROXY_PROTO_PATH := .
 
 .PHONY: all
 all:
@@ -30,6 +37,17 @@ all:
 	for proto in $(HUBBLE_PROTO_SOURCES) ; do \
 		echo Generating $${proto} && \
 		$(PROTOC) $(HUBBLE_PROTOC_PLUGINS) -I $(HUBBLE_PROTO_PATH) \
+			--doc_out=./ \
+			--doc_opt=markdown,README.md,source_relative \
+			--go_out=paths=source_relative:. \
+			--go-grpc_out=require_unimplemented_servers=false,paths=source_relative:. \
+			--go-json_out=orig_name=true,paths=source_relative:. \
+			$${proto}; \
+	done
+
+	for proto in $(STANDALONE_DNS_PROXY_PROTO_SOURCES) ; do \
+		echo Generating $${proto} && \
+		$(PROTOC) $(PROTOC_PLUGINS) -I $(STANDALONE_DNS_PROXY_PROTO_PATH) \
 			--doc_out=./ \
 			--doc_opt=markdown,README.md,source_relative \
 			--go_out=paths=source_relative:. \
