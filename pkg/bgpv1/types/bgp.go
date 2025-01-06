@@ -5,6 +5,7 @@ package types
 
 import (
 	"context"
+	"net"
 	"net/netip"
 	"strings"
 
@@ -337,4 +338,10 @@ type Router interface {
 
 	// GetBGP returns configured BGP global parameters
 	GetBGP(ctx context.Context) (GetBGPResponse, error)
+}
+
+// LbPool contains CIDR and Summarization flag
+type LbPool struct {
+	Cidrs     []*net.IPNet
+	Summarize bool
 }
