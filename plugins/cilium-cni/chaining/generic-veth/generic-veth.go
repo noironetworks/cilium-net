@@ -279,6 +279,15 @@ func (f *GenericVethChainer) Check(ctx context.Context, pluginCtx chainingapi.Pl
 	return nil
 }
 
+func (f *GenericVethChainer) Status(ctx context.Context, pluginCtx chainingapi.PluginContext, cli *client.Client) error {
+	if _, err := cli.Daemon.GetHealthz(nil); err != nil {
+		return cniTypes.NewError(cniTypes.ErrPluginNotAvailable, "DaemonHealthzFailed",
+			fmt.Sprintf("Cilium agent healthz check failed: %s", client.Hint(err)))
+	}
+	// TODO(architkulkarni) Read from StatusResponse?
+	return nil
+}
+
 func init() {
 	chainingapi.Register("generic-veth", &GenericVethChainer{})
 }
