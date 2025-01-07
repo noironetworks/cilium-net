@@ -69,7 +69,8 @@ func derivedName(name types.NamespacedName) string {
 	return "derived-" + strings.ToLower(base32.HexEncoding.WithPadding(base32.NoPadding).EncodeToString(hash.Sum(nil)))[:10]
 }
 
-func servicePorts(svcImport *mcsapiv1alpha1.ServiceImport) []corev1.ServicePort {
+func servicePorts(svcImport *mcsapiv1alpha1.ServiceImport, localSvc *corev1.Service) []corev1.ServicePort {
+	portMap := map[int32]*corev1.ServicePort{}
 	ports := make([]corev1.ServicePort, 0, len(svcImport.Spec.Ports))
 	for _, port := range svcImport.Spec.Ports {
 		ports = append(ports, corev1.ServicePort{
@@ -78,6 +79,26 @@ func servicePorts(svcImport *mcsapiv1alpha1.ServiceImport) []corev1.ServicePort 
 			AppProtocol: port.AppProtocol,
 			Port:        port.Port,
 		})
+		portMap[port.Port] = &ports[len(ports)-1]
+	}
+
+	// Populate the derived service targetPort from the local service so that local
+	// EndpointSlice are generated correctly
+	if localSvc == nil {
+		return ports
+	}
+	for _, port := range localSvc.Spec.Ports {
+		targetPortStr := port.TargetPort.String()
+		if targetPortStr == "" || targetPortStr == "0" {
+			continue
+		}
+		svcPort, ok := portMap[port.Port]
+		if !ok {
+			// The port is not merged yet into the ServiceImport, we will let
+			// the controller requeue when the ServiceImport changes
+			continue
+		}
+		svcPort.TargetPort = port.TargetPort
 	}
 	return ports
 }
@@ -194,7 +215,7 @@ func (r *mcsAPIServiceReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		svc.Spec.Selector = localSvc.Spec.Selector
 	}
 
-	svc.Spec.Ports = servicePorts(svcImport)
+	svc.Spec.Ports = servicePorts(svcImport, localSvc)
 	if err := ctrl.SetControllerReference(svcImport, svc, r.Scheme()); err != nil {
 		return controllerruntime.Fail(err)
 	}
