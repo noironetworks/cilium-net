@@ -14,11 +14,15 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	ec2_types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/sirupsen/logrus"
 
 	ipamTypes "github.com/cilium/cilium/pkg/ipam/types"
 	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/logging"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 )
 
+var log = logging.DefaultLogger.WithField(logfields.LogSubsys, "aws-eni-limits")
 var limitsOnce sync.Once
 
 // limit contains limits for adapter count and addresses. The mappings will be
@@ -805,13 +809,36 @@ func populateStaticENILimits() {
 }
 
 // Get returns the instance limits of a particular instance type.
-func Get(instanceType string) (limit ipamTypes.Limits, ok bool) {
+func Get(instanceType string, api ec2API) (limit ipamTypes.Limits, ok bool) {
+	// read the staic mapping and we will remove that later once we deprecate the UpdateEC2AdapterLimitViaAPI and static mapping
 	limitsOnce.Do(populateStaticENILimits)
 
 	limits.RLock()
 	limit, ok = limits.m[instanceType]
 	limits.RUnlock()
-	return
+	if ok {
+		return limit, true
+	}
+
+	// If not found, try to update from EC2 API
+	ctx := context.Background()
+	if err := UpdateFromEC2API(ctx, api); err != nil {
+		log.WithError(err).WithFields(logrus.Fields{
+			"instance-type": instanceType,
+		}).Warning("Failed to update instance limits from EC2 API")
+		return ipamTypes.Limits{}, false
+	}
+
+	limits.RLock()
+	limit, ok = limits.m[instanceType]
+	limits.RUnlock()
+	if !ok {
+		log.WithFields(logrus.Fields{
+			"instance-type": instanceType,
+		}).Error("Failed to find the limit after updating from EC2 API")
+	}
+
+	return limit, ok
 }
 
 // UpdateFromUserDefinedMappings updates limits from the given map.
