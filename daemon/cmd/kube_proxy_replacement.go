@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -360,11 +359,6 @@ func finishKubeProxyReplacementInit(sysctl sysctl.Sysctl, devices []*tables.Devi
 		// KPR=true is needed or we might rely on netfilter.
 		case option.Config.KubeProxyReplacement != option.KubeProxyReplacementTrue:
 			msg = fmt.Sprintf("BPF host routing requires %s=%s.", option.KubeProxyReplacement, option.KubeProxyReplacementTrue)
-		default:
-			if probes.HaveProgramHelper(ebpf.SchedCLS, asm.FnRedirectNeigh) != nil ||
-				probes.HaveProgramHelper(ebpf.SchedCLS, asm.FnRedirectPeer) != nil {
-				msg = "BPF host routing requires kernel 5.10 or newer."
-			}
 		}
 		if msg != "" {
 			option.Config.EnableHostLegacyRouting = true
@@ -375,17 +369,6 @@ func finishKubeProxyReplacementInit(sysctl sysctl.Sysctl, devices []*tables.Devi
 	option.Config.NodePortNat46X64 = option.Config.IsDualStack() &&
 		option.Config.DatapathMode == datapathOption.DatapathModeLBOnly &&
 		option.Config.NodePortMode == option.NodePortModeSNAT
-
-	// In the case where the fib lookup does not return the outgoing ifindex
-	// the datapath needs to store it in our CT map, and the map's field is
-	// limited to 16 bit.
-	if probes.HaveFibIfindex() != nil {
-		for _, iface := range devices {
-			if idx := iface.Index; idx > math.MaxUint16 {
-				return fmt.Errorf("%s link ifindex %d exceeds max(uint16)", iface.Name, iface.Index)
-			}
-		}
-	}
 
 	if option.Config.EnableIPv4 &&
 		!option.Config.TunnelingEnabled() &&

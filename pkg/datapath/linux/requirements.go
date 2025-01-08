@@ -15,6 +15,8 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/linux/safenetlink"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
 )
 
 // CheckRequirements checks that minimum kernel requirements are met for
@@ -38,6 +40,10 @@ func CheckRequirements(log *slog.Logger) error {
 	if !option.Config.DryMode {
 		probeManager := probes.NewProbeManager()
 
+		if probes.HaveProgramHelper(ebpf.CGroupSockAddr, asm.FnGetSocketCookie) != nil {
+			return errors.New("Require support for bpf_bpf_get_socket_cookie() (Linux 4.12 or newer)")
+		}
+
 		if probes.HaveDeadCodeElim() != nil {
 			return errors.New("Require support for dead code elimination (Linux 5.1 or newer)")
 		}
@@ -48,6 +54,14 @@ func CheckRequirements(log *slog.Logger) error {
 
 		if probes.HaveLargeInstructionLimit() != nil {
 			return errors.New("Require support for large programs (Linux 5.2.0 or newer)")
+		}
+
+		if probes.HaveProgramHelper(ebpf.SchedCLS, asm.FnRedirectNeigh) != nil {
+			return errors.New("Require support for bpf_redirect_neigh() (Linux 5.10.0 or newer)")
+		}
+
+		if probes.HaveProgramHelper(ebpf.SchedCLS, asm.FnRedirectPeer) != nil {
+			return errors.New("Require support for bpf_redirect_peer() (Linux 5.10.0 or newer)")
 		}
 
 		if err := probeManager.SystemConfigProbes(); err != nil {
