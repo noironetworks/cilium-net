@@ -221,3 +221,27 @@ func TestWaitForTermination(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestTriggerController(t *testing.T) {
+	mngr := NewManager()
+
+	ctrl := mngr.updateController("test", ControllerParams{
+		DoFunc: func(ctx context.Context) error {
+			return nil
+		},
+		RunInterval:        time.Duration(10) * time.Second, // A long interval to avoid interference
+		MinTriggerInterval: time.Duration(2) * time.Second,
+	})
+
+	time.Sleep(time.Duration(1) * time.Second) // wait for controller to start running
+	firstTimeStamp := ctrl.lastSuccessStamp    // get first timestamp
+	mngr.TriggerController("test")             // trigger controller
+	time.Sleep(time.Duration(2) * time.Second) // wait for controller to run and update timestamp
+	secondTimeStamp := ctrl.lastSuccessStamp
+	timeDiff := secondTimeStamp.Sub(firstTimeStamp)
+
+	require.Less(t, timeDiff, time.Duration(2100)*time.Millisecond)
+	require.Greater(t, timeDiff, time.Duration(1900)*time.Millisecond)
+	require.NoError(t, ctrl.GetLastError())
+	require.NoError(t, mngr.RemoveController("test"))
+}
