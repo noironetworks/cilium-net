@@ -383,7 +383,7 @@ func (ms *mapState) lookup(key Key) (mapStateEntry, bool) {
 	}
 
 	// Deny by default if no matches are found
-	return mapStateEntry{MapStateEntry: types.DenyEntry()}, false
+	return mapStateEntry{MapStateEntry: types.DenyEntry(), derivedFromRules: nilRuleOrigin}, false
 }
 
 func (ms *mapState) Len() int {
