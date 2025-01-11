@@ -27,6 +27,23 @@
 #define TYPE_PROXY_DNS_IP4 3
 #define TYPE_PROXY_DNS_IP6 4
 
+// Character literals don't appear be supported, hence this hack.
+// https://github.com/bpftrace/bpftrace/issues/3278
+#define CH_A 0x41   // 'A'
+#define CH_F 0x46   // 'F'
+#define CH_R 0x52   // 'R'
+#define CH_S 0x53   // 'S'
+#define CH_DOT 0x2E // '.'
+
+struct dnshdr {
+  u16 id;
+  u16 flags;
+  u16 qdcount;
+  u16 ancount;
+  u16 nscount;
+  u16 arcount;
+}
+
 kprobe:br_forward
 {
   $skb = ((struct sk_buff *) arg1);
@@ -44,13 +61,13 @@ kprobe:br_forward
     $udph = ((struct udphdr*) ($skb->head + $skb->inner_transport_header));
 
     if ($proto == PROTO_IPV4) {
-      $trace_override =
+      $pod_to_pod_via_proxy =
         @trace_ip4[$ip4h->saddr, $udph->source, $ip4h->protocol] ||
         @trace_ip4[$ip4h->daddr, $udph->dest, $ip4h->protocol];
 
       // Skip CiliumInternalIP addresses, as they belong to the PodCIDR,
       // unless the given flow is explicitly marked as traced (i.e., from proxy).
-      if (!$trace_override &&
+      if (!$pod_to_pod_via_proxy &&
            ($ip4h->saddr == (uint32)pton(str($1)) || $ip4h->daddr == (uint32)pton(str($1)) ||
             $ip4h->saddr == (uint32)pton(str($3)) || $ip4h->daddr == (uint32)pton(str($3)) ||
             $ip4h->saddr == (uint32)pton(str($5)) || $ip4h->daddr == (uint32)pton(str($5)))) {
@@ -59,13 +76,13 @@ kprobe:br_forward
     }
 
     if ($proto == PROTO_IPV6) {
-      $trace_override =
+      $pod_to_pod_via_proxy =
         @trace_ip6[$ip6h->saddr.in6_u.u6_addr8, $udph->source, $ip6h->nexthdr] ||
         @trace_ip6[$ip6h->daddr.in6_u.u6_addr8, $udph->dest, $ip6h->nexthdr];
 
       // Skip CiliumInternalIP addresses, as they belong to the PodCIDR
       // unless the given flow is explicitly marked as traced (i.e., from proxy).
-      if (!$trace_override &&
+      if (!$pod_to_pod_via_proxy &&
            ($ip6h->saddr.in6_u.u6_addr8 == pton(str($2)) || $ip6h->daddr.in6_u.u6_addr8 == pton(str($2)) ||
             $ip6h->saddr.in6_u.u6_addr8 == pton(str($4)) || $ip6h->daddr.in6_u.u6_addr8 == pton(str($4)) ||
             $ip6h->saddr.in6_u.u6_addr8 == pton(str($6)) || $ip6h->daddr.in6_u.u6_addr8 == pton(str($6)))) {
@@ -78,18 +95,35 @@ kprobe:br_forward
     $src_is_pod = (bswap($ip4h->saddr) & MASK4) == CIDR4;
     $dst_is_pod = (bswap($ip4h->daddr) & MASK4) == CIDR4;
 
-    $trace_override =
+    $pod_to_pod_via_proxy =
         @trace_ip4[$ip4h->saddr, $udph->source, $ip4h->protocol] ||
         @trace_ip4[$ip4h->daddr, $udph->dest, $ip4h->protocol];
 
-    if (($src_is_pod && $dst_is_pod) || ($trace_override && ($src_is_pod || $dst_is_pod))) {
-      printf("[%s] %s:%d -> %s:%d (proto: %d, ifindex: %d, netns: %x)\n",
+    if (($src_is_pod && $dst_is_pod) || ($pod_to_pod_via_proxy && ($src_is_pod || $dst_is_pod))) {
+      $tcph = (struct tcphdr*)$udph;
+      printf("[%s] %s:%d -> %s:%d (proto: %d, TCP flags: %c%c%c%c, encap: %d, ifindex: %d, netns: %x, override: %d)\n",
         strftime("%H:%M:%S:%f", nsecs),
         ntop($ip4h->saddr), bswap($udph->source),
         ntop($ip4h->daddr), bswap($udph->dest),
         $ip4h->protocol,
+        $ip4h->protocol == PROTO_TCP && $tcph->syn ? CH_S : CH_DOT,
+        $ip4h->protocol == PROTO_TCP && $tcph->ack ? CH_A : CH_DOT,
+        $ip4h->protocol == PROTO_TCP && $tcph->fin ? CH_F : CH_DOT,
+        $ip4h->protocol == PROTO_TCP && $tcph->rst ? CH_R : CH_DOT,
+        $skb->encapsulation,
         $skb->dev->ifindex,
-        $skb->dev->nd_net.net->ns.inum);
+        $skb->dev->nd_net.net->ns.inum,
+        $pod_to_pod_via_proxy);
+
+      if ($ip4h->protocol == PROTO_UDP && (bswap($udph->source) == PORT_DNS || bswap($udph->dest) == PORT_DNS)) {
+        $dns = (struct dnshdr*)($udph + 1);
+        $query = (uint8 *)($dns + 1);
+        printf("[%s] Detected DNS message, ID: %04x, flags %04x, QD: %d, AN: %d, NS: %d, AR: %d, query %s\n",
+          strftime("%H:%M:%S:%f", nsecs),
+          bswap($dns->id), bswap($dns->flags), bswap($dns->qdcount),
+          bswap($dns->ancount), bswap($dns->nscount), bswap($dns->arcount),
+          str(kptr($query)));
+      }
     }
   }
 
@@ -97,23 +131,41 @@ kprobe:br_forward
     $src_is_pod = bswap($ip6h->saddr.in6_u.u6_addr16[0]) == CIDR6;
     $dst_is_pod = bswap($ip6h->daddr.in6_u.u6_addr16[0]) == CIDR6;
 
-    $trace_override =
+    $pod_to_pod_via_proxy =
         @trace_ip6[$ip6h->saddr.in6_u.u6_addr8, $udph->source, $ip6h->nexthdr] ||
         @trace_ip6[$ip6h->daddr.in6_u.u6_addr8, $udph->dest, $ip6h->nexthdr];
 
-    if (($src_is_pod && $dst_is_pod) || ($trace_override && ($src_is_pod || $dst_is_pod))) {
-      printf("[%s] %s:%d -> %s:%d (proto: %d, ifindex: %d, netns: %x)\n",
+    if (($src_is_pod && $dst_is_pod) || ($pod_to_pod_via_proxy && ($src_is_pod || $dst_is_pod))) {
+      $tcph = (struct tcphdr*)$udph;
+      printf("[%s] %s:%d -> %s:%d (proto: %d, TCP flags: %c%c%c%c, encap: %d, ifindex: %d, netns: %x, override: %d)\n",
         strftime("%H:%M:%S:%f", nsecs),
         ntop($ip6h->saddr.in6_u.u6_addr8), bswap($udph->source),
         ntop($ip6h->daddr.in6_u.u6_addr8), bswap($udph->dest),
         $ip6h->nexthdr,
+        $ip6h->nexthdr == PROTO_TCP && $tcph->syn ? CH_S : CH_DOT,
+        $ip6h->nexthdr == PROTO_TCP && $tcph->ack ? CH_A : CH_DOT,
+        $ip6h->nexthdr == PROTO_TCP && $tcph->fin ? CH_F : CH_DOT,
+        $ip6h->nexthdr == PROTO_TCP && $tcph->rst ? CH_R : CH_DOT,
+        $skb->encapsulation,
         $skb->dev->ifindex,
-        $skb->dev->nd_net.net->ns.inum);
+        $skb->dev->nd_net.net->ns.inum,
+        $pod_to_pod_via_proxy);
+
+      if ($ip6h->nexthdr == PROTO_UDP && (bswap($udph->source) == PORT_DNS || bswap($udph->dest) == PORT_DNS)) {
+        $dns = (struct dnshdr*)($udph + 1);
+        $query = (uint8 *)($dns + 1);
+        printf("[%s] Detected DNS message, ID: %04x, flags %04x, QD: %d, AN: %d, NS: %d, AR: %d, query %s\n",
+          strftime("%H:%M:%S:%f", nsecs),
+          bswap($dns->id), bswap($dns->flags), bswap($dns->qdcount),
+          bswap($dns->ancount), bswap($dns->nscount), bswap($dns->arcount),
+          str(kptr($query)));
+      }
     }
   }
 }
 
 // Trace TCP connections established by the L7 proxy, even if the source address belongs to the host.
+// Ignore connections with the destination address outside pod CIDRs.
 kprobe:tcp_connect
 {
   if (strncmp(comm, "wrk:", 4) != 0) {
@@ -122,6 +174,19 @@ kprobe:tcp_connect
 
   $sk = ((struct sock *) arg0);
   $inet_family = $sk->__sk_common.skc_family;
+  $dst_is_pod = false;
+
+  if ($inet_family == AF_INET) {
+    $dst_is_pod = (bswap($sk->__sk_common.skc_daddr) & MASK4) == CIDR4;
+  }
+
+  if ($inet_family == AF_INET6) {
+    $dst_is_pod = bswap($sk->__sk_common.skc_v6_daddr.in6_u.u6_addr16[0]) == CIDR6;
+  }
+
+  if (!$dst_is_pod) {
+    return
+  }
 
   if ($inet_family == AF_INET) {
     @trace_ip4[$sk->__sk_common.skc_rcv_saddr, bswap($sk->__sk_common.skc_num), PROTO_TCP] = true;
