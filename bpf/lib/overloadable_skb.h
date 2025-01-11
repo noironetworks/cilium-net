@@ -336,8 +336,7 @@ ctx_set_encap_info6(struct __sk_buff *ctx, const union v6addr *tunnel_endpoint,
 	key.remote_ipv6[3] = tunnel_endpoint->p4;
 	key.tunnel_ttl = IPDEFTTL;
 
-	ret = ctx_set_tunnel_key(ctx, &key, key_size,
-				 BPF_F_TUNINFO_IPV6 | BPF_F_ZERO_CSUM_TX);
+	ret = ctx_set_tunnel_key(ctx, &key, key_size, BPF_F_TUNINFO_IPV6);
 	if (unlikely(ret < 0))
 		return DROP_WRITE_ERROR;
 
