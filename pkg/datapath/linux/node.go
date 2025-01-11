@@ -1076,7 +1076,7 @@ func (n *linuxNodeHandler) nodeUpdate(oldNode, newNode *nodeTypes.Node, firstAdd
 
 		oldIP := oldIP4
 		newIP := newIP4
-		if oldIP == nil || newIP == nil {
+		if oldIP == nil && newIP == nil {
 			oldIP = oldIP6
 			newIP = newIP6
 		}
