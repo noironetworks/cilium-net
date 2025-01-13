@@ -9,6 +9,7 @@
 #define TRACE_SOCK_NOTIFY
 
 #include <bpf/ctx/unspec.h>
+#include <bpf/config/global.h>
 
 #include "node_config.h"
 #include "lib/common.h"
