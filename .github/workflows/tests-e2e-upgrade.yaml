@@ -751,8 +751,7 @@ jobs:
         shell: bash
         run: |
           cilium connectivity test \
-            --test-concurrency=${{ env.test_concurrency }} \
-            --test "!seq-.*" \
+            --test "allow-all-except-world" \
             ${{ steps.cli-flags.outputs.flags }}
 
       - name: Setup conn dirstupt tests after a flush-ct Cilium tests
