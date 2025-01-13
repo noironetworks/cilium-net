@@ -616,8 +616,9 @@ func (e *Endpoint) initEndpointSyncController(interval time.Duration) {
 				e.syncEndpointHeaderFile()
 				return nil
 			},
-			RunInterval: interval,
-			Context:     e.aliveCtx,
+			RunInterval:        interval,
+			Context:            e.aliveCtx,
+			MinTriggerInterval: 5 * time.Second,
 		},
 	)
 }
