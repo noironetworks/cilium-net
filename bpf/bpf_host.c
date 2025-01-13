@@ -1315,8 +1315,12 @@ int cil_from_netdev(struct __ctx_buff *ctx)
 	 * ignore the return value from do_decrypt.
 	 */
 	do_decrypt(ctx, proto);
-	if (ctx->mark == MARK_MAGIC_DECRYPT)
+	if (ctx->mark == MARK_MAGIC_DECRYPT) {
+		send_trace_notify(ctx, obs_point, UNKNOWN_ID, UNKNOWN_ID,
+				  TRACE_EP_ID_UNKNOWN, ctx->ingress_ifindex,
+				  TRACE_REASON_ENCRYPTED, 0);
 		return CTX_ACT_OK;
+	}
 #endif
 
 	return do_netdev(ctx, proto, UNKNOWN_ID, obs_point, false);

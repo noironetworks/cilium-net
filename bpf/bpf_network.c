@@ -37,7 +37,7 @@ int cil_from_network(struct __ctx_buff *ctx)
 	 * be marked with MARK_MAGIC_DECRYPT.
 	 */
 	if ((ctx->mark & MARK_MAGIC_HOST_MASK) == MARK_MAGIC_DECRYPT)
-		obs_point_from = TRACE_FROM_STACK;
+		obs_point_from = TRACE_FROM_CRYPTO;
 
 #ifdef ENABLE_IPSEC
 	/* Pass unknown protocols to the stack */
