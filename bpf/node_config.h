@@ -4,16 +4,14 @@
 #pragma once
 
 /*
+ *   **** WARNING, THIS FILE IS DEPRECATED, DO NOT ADD NEW CONFIG HERE ****
  *
- *
- *                     **** WARNING ****
- * This is just a dummy header with dummy values to allow for test
- * compilation without the full code generation engine backend.
- *
- *
- *
+ * For adding new runtime configuration values to the datapath, use the new
+ * DECLARE_CONFIG set of macros in lib/static_data.h. Variables in this file
+ * will gradually be migrated to the new format, and this file will eventually
+ * be removed.
  */
-#include "lib/utils.h"
+#include <lib/static_data.h>
 
 #define CLUSTER_ID 0
 
@@ -325,3 +323,7 @@ return false;
 #endif
 
 #define CALLS_MAP test_cilium_calls_65535
+
+/*
+ *   **** WARNING, THIS FILE IS DEPRECATED, SEE COMMENT AT THE TOP ****
+ */

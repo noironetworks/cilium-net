@@ -6,8 +6,8 @@
 #include <bpf/ctx/skb.h>
 #include <bpf/api.h>
 
-#include <node_config.h>
 #include <bpf/config/global.h>
+#include <bpf/config/node.h>
 #include <bpf/config/endpoint.h>
 
 #define IS_BPF_HOST 1

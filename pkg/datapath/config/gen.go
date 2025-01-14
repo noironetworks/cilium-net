@@ -3,6 +3,10 @@
 
 package config
 
+// Node configuration is present in all objects and doesn't have a dedicated
+// ELF, so pull it out of bpf_lxc.
+// // go:generate go run github.com/cilium/cilium/tools/dpgen -path ../../../bpf/bpf_lxc.o -kind node -name Node -out node_config.go
+
 //go:generate go run github.com/cilium/cilium/tools/dpgen -path ../../../bpf/bpf_lxc.o -kind object -name BPFLXC -out lxc_config.go
 //go:generate go run github.com/cilium/cilium/tools/dpgen -path ../../../bpf/bpf_xdp.o -kind object -name BPFXDP -out xdp_config.go
 //go:generate go run github.com/cilium/cilium/tools/dpgen -path ../../../bpf/bpf_host.o -kind object -name BPFHost -out host_config.go
