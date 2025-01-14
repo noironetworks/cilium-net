@@ -1625,11 +1625,16 @@ static __always_inline int encap_geneve_dsr_opt4(struct __ctx_buff *ctx, int l3_
 	dst_sec_identity = 0;
 #else
 	info = lookup_ip4_remote_endpoint(ip4->daddr, 0);
-	if (!info || info->tunnel_endpoint == 0)
+	if (!info)
 		return DROP_NO_TUNNEL_ENDPOINT;
 
-	tunnel_endpoint = info->tunnel_endpoint;
 	dst_sec_identity = info->sec_identity;
+
+	if (identity_is_remote_node(dst_sec_identity))
+		tunnel_endpoint = ip4->daddr;
+	else
+		tunnel_endpoint = info->tunnel_endpoint;
+
 #endif
 
 	if (ip4->protocol == IPPROTO_TCP) {
