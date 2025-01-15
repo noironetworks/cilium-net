@@ -1219,6 +1219,11 @@ func (in *EndpointStatus) DeepCopyInto(out *EndpointStatus) {
 			}
 		}
 	}
+	if in.Workload != nil {
+		in, out := &in.Workload, &out.Workload
+		*out = new(models.Workload)
+		**out = **in
+	}
 	return
 }
 

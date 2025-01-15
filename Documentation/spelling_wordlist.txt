@@ -283,6 +283,7 @@ decrypt
 decrypted
 deduplicate
 deepcopy
+deepequal
 defaultLBServiceIPAM
 deletetopic
 demux

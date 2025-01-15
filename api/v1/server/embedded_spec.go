@@ -3242,6 +3242,10 @@ func init() {
         "state": {
           "description": "Current state of endpoint",
           "$ref": "#/definitions/EndpointState"
+        },
+        "workload": {
+          "description": "The workload information of the pod associated with this endpoint.",
+          "$ref": "#/definitions/Workload"
         }
       }
     },
@@ -5254,6 +5258,23 @@ func init() {
         },
         "node-encryption": {
           "description": "Node Encryption status",
+          "type": "string"
+        }
+      }
+    },
+    "Workload": {
+      "description": "An application running on Kubernetes.\n\n+deepequal-gen=true\n+k8s:deepcopy-gen=true",
+      "properties": {
+        "kind": {
+          "description": "Kind of the workload (Deployment, Statefulset, Daemonset, etc.)",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name of the workload",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace of the workload",
           "type": "string"
         }
       }
@@ -9016,6 +9037,10 @@ func init() {
         "state": {
           "description": "Current state of endpoint",
           "$ref": "#/definitions/EndpointState"
+        },
+        "workload": {
+          "description": "The workload information of the pod associated with this endpoint.",
+          "$ref": "#/definitions/Workload"
         }
       }
     },
@@ -11479,6 +11504,23 @@ func init() {
         },
         "node-encryption": {
           "description": "Node Encryption status",
+          "type": "string"
+        }
+      }
+    },
+    "Workload": {
+      "description": "An application running on Kubernetes.\n\n+deepequal-gen=true\n+k8s:deepcopy-gen=true",
+      "properties": {
+        "kind": {
+          "description": "Kind of the workload (Deployment, Statefulset, Daemonset, etc.)",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name of the workload",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace of the workload",
           "type": "string"
         }
       }
