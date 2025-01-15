@@ -934,7 +934,7 @@ encap_redirect:
 #endif
 
 #ifdef IS_BPF_OVERLAY
-	src_sec_identity = WORLD_ID;
+	src_sec_identity = ctx_load_meta(ctx, CB_SRC_LABEL);
 #endif
 
 #ifdef IS_BPF_WIREGUARD
@@ -2140,7 +2140,7 @@ nodeport_rev_dnat_ingress_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 #endif
 
 #ifdef IS_BPF_OVERLAY
-	src_sec_identity = WORLD_ID;
+	src_sec_identity = ctx_load_meta(ctx, CB_SRC_LABEL);
 #endif
 
 #ifdef IS_BPF_WIREGUARD
