@@ -1000,7 +1000,7 @@ func (cmd *Cmd) Status(args *skel.CmdArgs) error {
 	}
 
 	if _, err := c.Daemon.GetHealthz(nil); err != nil {
-		return cniTypes.NewError(cniTypes.ErrPluginNotAvailable, "DaemonHealthzFailed",
+		return cniTypes.NewError(types.CniErrPluginNotAvailable, "DaemonHealthzFailed",
 			fmt.Sprintf("Cilium agent healthz check failed: %s", client.Hint(err)))
 	}
 	logger.Debugf("Cilium agent is healthy")
