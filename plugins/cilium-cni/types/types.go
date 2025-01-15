@@ -110,7 +110,7 @@ type Args struct{}
 // CNI error codes
 // (error codes 100+ are allowed for plugin use)
 const (
-	CniErrPluginNotAvailable uint = 50
-	CniErrHealthzGet         uint = 100
-	CniErrUnhealthy               = iota
+	CniErrHealthzGet uint = 100
+	CniErrUnhealthy       = iota
 )
+const CniErrPluginNotAvailable uint = 50
