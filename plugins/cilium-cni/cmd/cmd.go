@@ -957,7 +957,7 @@ func (cmd *Cmd) Check(args *skel.CmdArgs) error {
 // Currently, it
 //   - checks cilium-cni connectivity with cilium-agent using healthz endpoint
 //   - If cilium-cni depends on delegated plugins (host-local, azure etc) for IPAM,
-//     cilium-cni invokes the STATUS API of the delegated plugins and pass the result back.
+//     cilium-cni invokes the STATUS API of the delegated plugins and passes the result back.
 func (cmd *Cmd) Status(args *skel.CmdArgs) error {
 	n, err := types.LoadNetConf(args.StdinData)
 	if err != nil {
@@ -979,13 +979,12 @@ func (cmd *Cmd) Status(args *skel.CmdArgs) error {
 			defer gops.Close()
 		}
 	}
-	logger.WithField("netconf", logfields.Repr(n)).Debugf("Processing CNI CHECK request")
+	logger.WithField("netconf", logfields.Repr(n)).Debugf("Processing CNI STATUS request")
 
 	if n.PrevResult != nil {
 		logger.WithField("previousResult", logfields.Repr(n.PrevResult)).Debugf("CNI Previous result")
 	}
 
-	// TODO(architkulkarni): Technically there are no cni Args for STATUS? Is this true?
 	cniArgs := &types.ArgsSpec{}
 	if err = cniTypes.LoadArgs(args.Args, cniArgs); err != nil {
 		return cniTypes.NewError(cniTypes.ErrInvalidNetworkConfig, "InvalidArgs",
@@ -1004,12 +1003,29 @@ func (cmd *Cmd) Status(args *skel.CmdArgs) error {
 		return cniTypes.NewError(cniTypes.ErrPluginNotAvailable, "DaemonHealthzFailed",
 			fmt.Sprintf("Cilium agent healthz check failed: %s", client.Hint(err)))
 	}
-
-	// TODO(architkulkarni) What do we actually need to read from the StatusResponse here?
-	// There are a lot of fields there, including Cilium "//Status of Cilium daemon"
 	logger.Debugf("Cilium agent is healthy")
 
-	// TODO(architkulkarni) Do we need to do the "chained mode" logic here as in ADD, DELETE, etc above?
+	// If this is a chained plugin, then "delegate" to the special chaining mode and be done
+	if chainAction, err := getChainedAction(n, logger); chainAction != nil {
+		var (
+			ctx = chainingapi.PluginContext{
+				Logger:  logger,
+				Args:    args,
+				CniArgs: cniArgs,
+				NetConf: n,
+			}
+		)
+
+		// err is nil on success
+		err := chainAction.Status(context.TODO(), ctx, c)
+		logger.WithError(err).Debugf("Chained STATUS %s returned", n.Name)
+
+		return err
+	} else if err != nil {
+		logger.WithError(err).Error("Invalid chaining mode")
+		return err
+	}
+	fmt.Fprintln(os.Stderr, "No chained plugin")
 
 	if n.IPAM.Type != "" {
 		// If using a delegated plugin for IPAM, invoke the STATUS API of the delegated

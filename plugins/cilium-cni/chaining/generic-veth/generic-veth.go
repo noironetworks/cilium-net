@@ -284,7 +284,6 @@ func (f *GenericVethChainer) Status(ctx context.Context, pluginCtx chainingapi.P
 		return cniTypes.NewError(cniTypes.ErrPluginNotAvailable, "DaemonHealthzFailed",
 			fmt.Sprintf("Cilium agent healthz check failed: %s", client.Hint(err)))
 	}
-	// TODO(architkulkarni) Read from StatusResponse?
 	return nil
 }
 
