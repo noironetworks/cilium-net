@@ -242,7 +242,6 @@ const (
 	ErrDecodingFailure                         // 6
 	ErrInvalidNetworkConfig                    // 7
 	ErrInvalidNetNS                            // 8
-	ErrPluginNotAvailable          uint = 50
 	ErrTryAgainLater               uint = 11
 	ErrInternal                    uint = 999
 )
