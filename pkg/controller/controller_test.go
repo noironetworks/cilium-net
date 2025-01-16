@@ -233,15 +233,28 @@ func TestTriggerController(t *testing.T) {
 		MinTriggerInterval: time.Duration(2) * time.Second,
 	})
 
-	time.Sleep(time.Duration(1) * time.Second) // wait for controller to start running
-	firstTimeStamp := ctrl.lastSuccessStamp    // get first timestamp
-	mngr.TriggerController("test")             // trigger controller
-	time.Sleep(time.Duration(2) * time.Second) // wait for controller to run and update timestamp
-	secondTimeStamp := ctrl.lastSuccessStamp
-	timeDiff := secondTimeStamp.Sub(firstTimeStamp)
+	var firstTimeStamp time.Time
+	var secondTimeStamp time.Time
+	for n := 0; ctrl.GetSuccessCount() < 3; n++ {
+		if n > 100 {
+			t.Fatalf("time out while waiting for controller to succeed, last error: %s", ctrl.GetLastError())
+		}
+		mngr.TriggerController("test")
+		if ctrl.GetSuccessCount() == 1 {
+			firstTimeStamp = ctrl.lastSuccessStamp
+			mngr.TriggerController("test")
+		}
 
-	require.Less(t, timeDiff, time.Duration(2100)*time.Millisecond)
-	require.Greater(t, timeDiff, time.Duration(1900)*time.Millisecond)
+		if ctrl.GetSuccessCount() == 2 {
+			secondTimeStamp = ctrl.lastSuccessStamp
+			timeDiff := secondTimeStamp.Sub(firstTimeStamp)
+			require.Less(t, timeDiff, time.Duration(2100)*time.Millisecond)
+			require.Greater(t, timeDiff, time.Duration(1900)*time.Millisecond)
+		}
+
+		time.Sleep(time.Duration(100) * time.Millisecond) // To make sure the timestamp is updated before the next check
+	}
+
 	require.NoError(t, ctrl.GetLastError())
 	require.NoError(t, mngr.RemoveController("test"))
 }
