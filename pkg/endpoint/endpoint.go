@@ -607,6 +607,7 @@ func createEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, nam
 	return ep
 }
 
+// The controller is added to ensure timely sync of DNS information to disk.
 func (e *Endpoint) initEndpointSyncController(interval time.Duration) {
 	ctrlName := e.GetK8sNamespaceAndPodName() + "-" + endpointHeaderFileSync
 	e.controllers.UpdateController(ctrlName,

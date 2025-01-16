@@ -252,11 +252,8 @@ func (c *controller) runController(params ControllerParams) {
 
 		interval := params.RunInterval
 
-		if params.MinTriggerInterval > 0 {
-			if delayNeeded, delay := c.needsDelay(params.MinTriggerInterval); delayNeeded {
-				time.Sleep(delay)
-			}
-		}
+		delay := c.needsDelay(params.MinTriggerInterval)
+		time.Sleep(delay)
 
 		start := time.Now()
 		err = params.DoFunc(params.Context)
@@ -363,18 +360,14 @@ shutdown:
 	close(c.terminated)
 }
 
-func (c *controller) needsDelay(minInterval time.Duration) (bool, time.Duration) {
-	if minInterval == time.Duration(0) {
-		return false, 0
-	}
-
+func (c *controller) needsDelay(minInterval time.Duration) time.Duration {
 	successTime := time.Since(c.lastSuccessStamp.Add(minInterval)) * -1
 	failureTime := time.Since(c.lastErrorStamp.Add(minInterval)) * -1
 	if successTime > 0 || failureTime > 0 {
-		return true, time.Duration(math.Max(float64(successTime), float64(failureTime)))
+		return time.Duration(math.Max(float64(successTime), float64(failureTime)))
 	}
 
-	return false, 0
+	return time.Duration(0)
 }
 
 // logger returns a logrus object with controllerName and UUID fields.
