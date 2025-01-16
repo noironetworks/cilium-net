@@ -122,6 +122,7 @@ func TestL34Decode(t *testing.T) {
 		0x81,       // "established" trace reason with the encrypt bit set
 		0,          // flags
 		0, 0, 0, 0, // ifindex
+		0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12, // trace_id
 		246, 141, 178, 45, 33, 217, 246, 141, 178,
 		45, 33, 217, 8, 0, 69, 0, 0, 52, 234, 28, 64, 0, 64, 6, 120, 49, 192,
 		168, 60, 11, 10, 16, 236, 178, 25, 43, 211, 206, 42, 239, 210, 28, 180,
@@ -249,7 +250,8 @@ func TestL34Decode(t *testing.T) {
 	//ff02::1:ff00:b3e5   f00d::a10:0:0:9195   L3/4
 	d2 := []byte{
 		4, 5, 168, 11, 95, 22, 242, 184, 86, 0, 0, 0, 86, 0, 0, 0, 104, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 51, 51, 255, 0, 179, 229, 18, 145,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		51, 51, 255, 0, 179, 229, 18, 145,
 		6, 226, 34, 26, 134, 221, 96, 0, 0, 0, 0, 32, 58, 255, 255, 2, 0, 0, 0,
 		0, 0, 0, 0, 0, 0, 1, 255, 0, 179, 229, 240, 13, 0, 0, 0, 0, 0, 0, 10,
 		16, 0, 0, 0, 0, 145, 149, 135, 0, 80, 117, 0, 0, 0, 0, 240, 13, 0, 0, 0,
@@ -399,8 +401,8 @@ func TestDecodeDropNotify(t *testing.T) {
 	SrcLabel := identity.NumericIdentity(123)
 	DstLabel := identity.NumericIdentity(456)
 
-	dropNotify := func(version uint16) monitor.DropNotify {
-		return monitor.DropNotify{
+	dropNotify := func(version uint16) monitor.DropNotifyV1 {
+		return monitor.DropNotifyV1{
 			Type:     byte(monitorAPI.MessageTypeDrop),
 			File:     1, // bpf_host.c
 			Version:  version,
@@ -433,6 +435,40 @@ func TestDecodeDropNotify(t *testing.T) {
 		{
 			name:      "v1",
 			dn:        dropNotify(1),
+			srcLabels: []string{"k8s:src=label"},
+			dstLabels: []string{"k8s:dst=label"},
+			want: &flowpb.Flow{
+				Verdict: flowpb.Verdict_DROPPED,
+				Ethernet: &flowpb.Ethernet{
+					Source:      "01:02:03:04:05:06",
+					Destination: "04:05:06:07:08:09",
+				},
+				IP: &flowpb.IP{
+					Source:      "1.2.3.4",
+					Destination: "1.2.3.4",
+					IpVersion:   flowpb.IPVersion_IPv4,
+				},
+				Source: &flowpb.Endpoint{
+					Identity: 123,
+					Labels:   []string{"k8s:src=label"},
+				},
+				Destination: &flowpb.Endpoint{
+					Identity: 456,
+					Labels:   []string{"k8s:dst=label"},
+				},
+				Type: flowpb.FlowType_L3_L4,
+				EventType: &flowpb.CiliumEventType{
+					Type: 1,
+				},
+				Summary: "IPv4",
+				File:    &flowpb.FileInfo{Name: "bpf_host.c"},
+			},
+		},
+		{
+			name: "v2",
+			dn: monitor.DropNotify{
+				DropNotifyV1: dropNotify(2),
+			},
 			srcLabels: []string{"k8s:src=label"},
 			dstLabels: []string{"k8s:dst=label"},
 			want: &flowpb.Flow{
@@ -622,7 +658,7 @@ func TestDecodePolicyVerdictNotify(t *testing.T) {
 
 func TestDecodeDropReason(t *testing.T) {
 	reason := uint8(130)
-	dn := monitor.DropNotify{
+	dn := monitor.DropNotifyV1{
 		Type:    byte(monitorAPI.MessageTypeDrop),
 		SubType: reason,
 	}
@@ -800,7 +836,7 @@ func TestDecodeTrafficDirection(t *testing.T) {
 	}
 
 	// DROP at unknown endpoint
-	dn := monitor.DropNotify{
+	dn := monitor.DropNotifyV1{
 		Type: byte(monitorAPI.MessageTypeDrop),
 	}
 	f := parseFlow(dn, localIP, remoteIP)
@@ -808,7 +844,7 @@ func TestDecodeTrafficDirection(t *testing.T) {
 	assert.Equal(t, uint32(localEP), f.GetSource().GetID())
 
 	// DROP Egress
-	dn = monitor.DropNotify{
+	dn = monitor.DropNotifyV1{
 		Type:   byte(monitorAPI.MessageTypeDrop),
 		Source: localEP,
 	}
@@ -817,7 +853,7 @@ func TestDecodeTrafficDirection(t *testing.T) {
 	assert.Equal(t, uint32(localEP), f.GetSource().GetID())
 
 	// DROP Ingress
-	dn = monitor.DropNotify{
+	dn = monitor.DropNotifyV1{
 		Type:   byte(monitorAPI.MessageTypeDrop),
 		Source: localEP,
 	}
@@ -1105,7 +1141,7 @@ func TestDecodeIsReply(t *testing.T) {
 	assert.False(t, f.GetReply())
 
 	// DropNotify statically assumes is_reply=unknown
-	dn := monitor.DropNotify{
+	dn := monitor.DropNotifyV1{
 		Type: byte(monitorAPI.MessageTypeDrop),
 	}
 	f = parseFlow(dn, localIP, remoteIP)
@@ -1494,13 +1530,13 @@ func TestDecode_DropNotify(t *testing.T) {
 
 	testCases := []struct {
 		name    string
-		event   monitor.DropNotify
+		event   monitor.DropNotifyV1
 		ipTuple ipTuple
 		want    *flowpb.Flow
 	}{
 		{
 			name: "drop_unknown",
-			event: monitor.DropNotify{
+			event: monitor.DropNotifyV1{
 				Type: byte(monitorAPI.MessageTypeDrop),
 				File: 2,
 				Line: 42,
@@ -1516,7 +1552,7 @@ func TestDecode_DropNotify(t *testing.T) {
 		},
 		{
 			name: "drop_egress",
-			event: monitor.DropNotify{
+			event: monitor.DropNotifyV1{
 				Type:   byte(monitorAPI.MessageTypeDrop),
 				Source: localEP,
 				File:   6,
@@ -1534,7 +1570,7 @@ func TestDecode_DropNotify(t *testing.T) {
 		},
 		{
 			name: "drop_ingress",
-			event: monitor.DropNotify{
+			event: monitor.DropNotifyV1{
 				Type:   byte(monitorAPI.MessageTypeDrop),
 				Source: localEP,
 				File:   4,
