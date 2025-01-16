@@ -15,10 +15,8 @@
 #include "common.h"
 #include "ratelimit.h"
 
-#ifndef POLICY_VERDICT_LOG_FILTER
-DEFINE_U32(POLICY_VERDICT_LOG_FILTER, 0xffff);
-#define POLICY_VERDICT_LOG_FILTER fetch_u32(POLICY_VERDICT_LOG_FILTER)
-#endif
+DECLARE_CONFIG(__u32, policy_verdict_log_filter, "The log level for policy verdicts in workload endpoints")
+#define POLICY_VERDICT_LOG_FILTER CONFIG(policy_verdict_log_filter)
 
 struct policy_verdict_notify {
 	NOTIFY_CAPTURE_HDR
