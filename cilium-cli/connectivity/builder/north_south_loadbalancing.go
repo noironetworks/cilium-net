@@ -16,5 +16,8 @@ func (t northSouthLoadbalancing) build(ct *check.ConnectivityTest, _ map[string]
 		WithFeatureRequirements(
 			withKPRReqForMultiCluster(ct, features.RequireEnabled(features.NodeWithoutCilium))...,
 		).
-		WithScenarios(tests.OutsideToNodePort())
+		WithScenarios(
+			tests.OutsideToNodePort(),
+			tests.OutsideToNodePortForHostNetNs(),
+		)
 }
