@@ -2288,6 +2288,10 @@
      - Time to wait before using new identity on endpoint identity change.
      - string
      - ``"5s"``
+   * - :spelling:ignore:`identityManagementMode`
+     - Control whether CiliumIdentities are created by the agent ("agent"), the operator ("operator") or both ("both"). "Both" should be used only to migrate between "agent" and "operator".
+     - string
+     - ``"agent"``
    * - :spelling:ignore:`image`
      - Agent container image.
      - object
