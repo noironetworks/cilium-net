@@ -678,7 +678,7 @@ int cil_from_overlay(struct __ctx_buff *ctx)
 		 * re-inserted from the stack.
 		 */
 		if (decrypted)
-			obs_point = TRACE_FROM_STACK;
+			obs_point = TRACE_FROM_CRYPTO;
 
 		send_trace_notify(ctx, obs_point, src_sec_identity, UNKNOWN_ID,
 				  TRACE_EP_ID_UNKNOWN, ctx->ingress_ifindex,
